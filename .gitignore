@@ -1,3 +1,4 @@
 /target
 Rakefile
 Makefile
+Cargo.lock
