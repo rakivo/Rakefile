@@ -61,9 +61,14 @@ impl<'a> Rakefile<'a> {
 
     fn parse_job(&mut self, idx: &usize, line: &str) -> RResult::<()> {
         let (target, deps_untrimmed) = line.split_at(*idx);
-        let deps = deps_untrimmed.chars()
+
+        let deps_str = deps_untrimmed.chars()
             .skip_while(|c| c.is_whitespace() || c.eq(&':'))
             .collect::<String>();
+
+        let deps = deps_str
+            .split_whitespace()
+            .collect::<Vec::<_>>();
 
         let mut body = Vec::new();
         while let Some(next_line) = self.iter.next() {
@@ -87,7 +92,7 @@ impl<'a> Rakefile<'a> {
         }
 
         println!("\ntarget: {target}");
-        println!("deps: {deps}");
+        println!("deps: {deps:?}");
         println!("body: {body:?}");
 
         Ok(())
