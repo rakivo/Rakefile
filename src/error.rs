@@ -18,8 +18,9 @@ pub enum RakeError<'a> {
 impl Display for RakeError<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         use RakeError::*;
+        let expected = Rakefile::TAB_WIDTH;
         match self {
-            InvalidIndentation(file_path, width, row) => write!(f, "{file_path}:{row} Invalid indentation, expected: {exp}, got: {width}", exp = Rakefile::TAB_WIDTH),
+            InvalidIndentation(file_path, width, row) => write!(f, "{file_path}:{row} Invalid indentation, expected: {expected}, got: {width}"),
             NoRakefileInDir(dir) => write!(f, "No Rakefile in: {dir}", dir = dir.display()),
         }
     }
