@@ -69,7 +69,7 @@ impl<'a> Rakefile<'a> {
 
                 match whitespace_count {
                     Self::TAB_WIDTH => body.push(next_line.trim()),
-                    i @ 1.. => return Err(RakeError::InvalidIndent(&self.file_path, i, self.row)),
+                    i @ 1.. => return Err(RakeError::InvalidIndentation(&self.file_path, i, self.row)),
                     _ => break
                 };
             }
@@ -90,9 +90,12 @@ impl<'a> Rakefile<'a> {
     }
 
     fn perform() -> RResult::<'a, ()> {
-        let file_path = Self::find_rakefile()?;
+        let file_path = Self::find_rakefile().map_err(|err| {
+            eprintln!("ERROR: {err}");
+            err
+        }).unwrap();
         let file_str = read_to_string(&file_path).map_err(|err| {
-            eprintln!("Failed to read to string from file: {file_path}: {err}",
+            eprintln!("Failed to `read to string` from file: {file_path}: {err}",
                       file_path = file_path.display());
             err
         }).unwrap();
