@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-robuild = "0.0.9"
+robuild = "0.0.10"
