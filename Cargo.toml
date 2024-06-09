@@ -4,8 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-robuild = {path="../robuild"}
-
-[[bin]]
-name = "rakefile"
-path = "main.rs"
+robuild = "0.0.9"
