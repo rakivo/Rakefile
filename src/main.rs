@@ -2,7 +2,6 @@ use std::{
     env,
     result,
     str::Lines,
-    process::exit,
     path::PathBuf,
     iter::Peekable,
     default::Default,
@@ -40,10 +39,7 @@ impl<'a> Rakefile<'a> {
     pub const RAKE_FILE_NAME: &'static str = "Rakefile";
 
     fn find_rakefile() -> RResult::<'a, PathBuf> {
-        let dir_path = env::current_dir().unwrap_or_else(|err| {
-            eprintln!("ERROR: Failed to get current dir: {err}");
-            exit(1);
-        });
+        let dir_path = env::current_dir().unwrap_or_report();
 
         let dir = Dir::new(&dir_path);
         dir.into_iter()
@@ -71,12 +67,15 @@ impl<'a> Rakefile<'a> {
             .collect::<Vec::<_>>();
 
         let mut body = Vec::new();
-        while let Some(next_line) = self.iter.next() {
+        while let Some(next_line) = self.iter.peek() {
             self.row += 1;
+
+            let trimmed = next_line.trim();
 
             // Allow people to use both tabs and spaces
             if next_line.starts_with('\t') {
-                body.push(next_line.trim());
+                body.push(trimmed);
+                self.iter.next();
                 continue
             }
 
@@ -85,9 +84,12 @@ impl<'a> Rakefile<'a> {
                 .count();
 
             match whitespace_count {
-                Self::TAB_WIDTH => body.push(next_line.trim()),
+                Self::TAB_WIDTH => {
+                    self.iter.next();
+                    body.push(trimmed)
+                }
                 i @ 1.. => return Err(RakeError::InvalidIndentation(&self.file_path, i, self.row)),
-                _ => break
+                _ => if trimmed.is_empty() { self.iter.next(); } else { break }
             };
         }
 
@@ -106,16 +108,8 @@ impl<'a> Rakefile<'a> {
     }
 
     fn perform() -> RResult::<'a, ()> {
-        let file_path = Self::find_rakefile().unwrap_or_else(|err| {
-            eprintln!("ERROR: {err}");
-            exit(1);
-        });
-
-        let file_str = read_to_string(&file_path).unwrap_or_else(|err| {
-            eprintln!("ERROR: Failed to `read to string` from file: {file_path}: {err}",
-                      file_path = file_path.display());
-            exit(1);
-        });
+        let file_path = Self::find_rakefile().unwrap_or_report();
+        let file_str = read_to_string(&file_path).unwrap_or_report();
 
         let mut rakefile = Rakefile {
             file_path: Self::pretty_file_path(file_path.to_str().expect("Failed to convert file path to str")),
@@ -124,10 +118,7 @@ impl<'a> Rakefile<'a> {
         };
 
         while let Some(line) = rakefile.iter.next() {
-            rakefile.parse_line(&line).unwrap_or_else(|err| {
-                eprintln!("ERROR: {err}");
-                exit(1);
-            });
+            rakefile.parse_line(&line).unwrap_or_report();
             rakefile.row += 1;
         }
 
