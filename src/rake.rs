@@ -149,8 +149,6 @@ impl<'a> Rakefile<'a> {
             .split_whitespace()
             .collect::<Vec::<_>>();
 
-        println!("{deps:?}");
-
         let deps_joined = deps.join(" ");
 
         let mut body = Vec::new();
