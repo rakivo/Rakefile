@@ -54,7 +54,7 @@ impl<'a> Rakefile<'a> {
         }).collect::<Vec::<_>>().into_iter().rev().collect()
     }
 
-    #[inline(always)]
+    #[inline]
     fn advance(&mut self) {
         self.iter.next();
         self.row += 1;
@@ -63,6 +63,37 @@ impl<'a> Rakefile<'a> {
     #[inline]
     fn append_job(&mut self, job: Job) {
         self.jobs.push(job);
+    }
+
+    // Allow people to use both Makefiles and Rakefiles
+    // special symbols.
+    //
+    // SS -> Special Symbol
+    //
+    const TARGET_MAKE_SS: &'static str = "$@";
+    const TARGET_RAKE_SS: &'static str = "$t";
+
+    const DEPS_MAKE_SS: &'static str = "$d";
+    const DEPS_RAKE_SS: &'static str = "$<";
+
+    const ALL_DEPS_MAKE_SS: &'static str = "$ad";
+    const ALL_DEPS_RAKE_SS: &'static str = "$^";
+
+    fn parse_special_symbols
+    (
+        target:      &str,
+        deps_joined: &str,
+        deps: &Vec::<&str>,
+        line: &mut String
+    ) {
+        *line = line.replace(Self::TARGET_MAKE_SS, &target);
+        *line = line.replace(Self::TARGET_RAKE_SS, &target);
+
+        *line = line.replace(Self::DEPS_MAKE_SS, &deps[0]);
+        *line = line.replace(Self::DEPS_RAKE_SS, &deps[0]);
+
+        *line = line.replace(Self::ALL_DEPS_MAKE_SS, &deps_joined);
+        *line = line.replace(Self::ALL_DEPS_RAKE_SS, &deps_joined);
     }
 
     fn parse_job(&mut self, idx: &usize, line: &str) -> RResult::<()> {
@@ -76,9 +107,14 @@ impl<'a> Rakefile<'a> {
             .split_whitespace()
             .collect::<Vec::<_>>();
 
+        let deps_joined = deps.join(" ");
+
         let mut body = Vec::new();
         while let Some(next_line) = self.iter.peek() {
-            let trimmed = next_line.trim();
+            let mut next_line = (*next_line).to_owned();
+            Self::parse_special_symbols(&target, &deps_joined, &deps, &mut next_line);
+
+            let trimmed = next_line.trim().to_owned();
 
             // Allow people to use both tabs and spaces
             if next_line.starts_with('\t') {
@@ -102,7 +138,7 @@ impl<'a> Rakefile<'a> {
         }
 
         let mut cmd = RobCommand::new();
-        body.iter().for_each(|line| { cmd.append_mv(&[*line]); });
+        body.iter().for_each(|line| { cmd.append_mv(&[line]); });
         let job = Job::new(target, deps, cmd);
         self.append_job(job);
 
@@ -113,7 +149,7 @@ impl<'a> Rakefile<'a> {
         let mut jobss = Vec::new();
 
         for job in self.jobs.iter_mut() {
-            jobss.push(job.execute_sync()?);
+            jobss.push(job.execute_async()?);
         }
 
         Ok(jobss)
