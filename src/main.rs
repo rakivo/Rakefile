@@ -4,6 +4,7 @@ use std::{
     str::Lines,
     path::PathBuf,
     iter::Peekable,
+    process::Output,
     default::Default,
     fs::read_to_string,
 };
@@ -16,7 +17,6 @@ type RResult<'a, T> = result::Result::<T, RakeError<'a>>;
 
 struct Rakefile<'a> {
     file_path: String,
-    #[allow(unused)]
     jobs: Vec::<Job>,
     row: usize,
     iter: Peekable::<Lines<'a>>
@@ -40,7 +40,6 @@ impl<'a> Rakefile<'a> {
 
     fn find_rakefile() -> RResult::<'a, PathBuf> {
         let dir_path = env::current_dir().unwrap_or_report();
-
         let dir = Dir::new(&dir_path);
         dir.into_iter()
            .find(|f| matches!(f.file_name(), Some(name) if name == Self::RAKE_FILE_NAME))
@@ -53,6 +52,17 @@ impl<'a> Rakefile<'a> {
             if *c == DELIM_CHAR { count += 1; }
             count < Self::MAX_DIR_LVL
         }).collect::<Vec::<_>>().into_iter().rev().collect()
+    }
+
+    #[inline(always)]
+    fn advance(&mut self) {
+        self.iter.next();
+        self.row += 1;
+    }
+
+    #[inline]
+    fn append_job(&mut self, job: Job) {
+        self.jobs.push(job);
     }
 
     fn parse_job(&mut self, idx: &usize, line: &str) -> RResult::<()> {
@@ -68,14 +78,12 @@ impl<'a> Rakefile<'a> {
 
         let mut body = Vec::new();
         while let Some(next_line) = self.iter.peek() {
-            self.row += 1;
-
             let trimmed = next_line.trim();
 
             // Allow people to use both tabs and spaces
             if next_line.starts_with('\t') {
                 body.push(trimmed);
-                self.iter.next();
+                self.advance();
                 continue
             }
 
@@ -85,29 +93,39 @@ impl<'a> Rakefile<'a> {
 
             match whitespace_count {
                 Self::TAB_WIDTH => {
-                    self.iter.next();
+                    self.advance();
                     body.push(trimmed)
                 }
-                i @ 1.. => return Err(RakeError::InvalidIndentation(&self.file_path, i, self.row)),
-                _ => if trimmed.is_empty() { self.iter.next(); } else { break }
+                i @ 1.. => return Err(RakeError::InvalidIndentation(&self.file_path, i, self.row + 1)),
+                _ => if trimmed.is_empty() { self.advance(); } else { break }
             };
         }
 
-        println!("\ntarget: {target}");
-        println!("deps: {deps:?}");
-        println!("body: {body:?}");
+        let mut cmd = RobCommand::new();
+        body.iter().for_each(|line| { cmd.append_mv(&[*line]); });
+        let job = Job::new(target, deps, cmd);
+        self.append_job(job);
 
         Ok(())
+    }
+
+    fn execute_jobs(&mut self) -> IoResult::<Vec::<Vec::<Output>>> {
+        let mut jobss = Vec::new();
+
+        for job in self.jobs.iter_mut() {
+            jobss.push(job.execute_sync()?);
+        }
+
+        Ok(jobss)
     }
 
     fn parse_line(&mut self, line: &str) -> RResult::<()> {
         if let Some(colon_idx) = line.chars().position(|x| x == ':') {
             self.parse_job(&colon_idx, line)?;
-        }
-        Ok(())
+        } Ok(())
     }
 
-    fn perform() -> RResult::<'a, ()> {
+    fn init()  {
         let file_path = Self::find_rakefile().unwrap_or_report();
         let file_str = read_to_string(&file_path).unwrap_or_report();
 
@@ -119,13 +137,19 @@ impl<'a> Rakefile<'a> {
 
         while let Some(line) = rakefile.iter.next() {
             rakefile.parse_line(&line).unwrap_or_report();
-            rakefile.row += 1;
         }
 
-        Ok(())
+        rakefile.execute_jobs().unwrap_or_report();
     }
 }
 
-fn main() -> RResult::<'static, ()> {
-    Rakefile::perform()
+fn main() {
+    Rakefile::init()
 }
+
+/* TODO:
+    1. Jobs as dependencies of other jobs,
+    2. Special symbols: $@, $t, $d, $<, $*, %, CC,
+    3. Parse flags,
+    4. Async mode,
+*/
