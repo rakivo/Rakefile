@@ -7,22 +7,56 @@ use {
     crate::Rakefile
 };
 
+// File path, tab width, row
+#[derive(Debug)]
+pub struct Info<'a>(pub &'a str, pub usize);
+
+impl<'a> From::<&'a Rakefile<'_>> for Info<'a> {
+    #[inline]
+    fn from(rake: &'a Rakefile) -> Self {
+        Self(&rake.file_path, rake.row)
+    }
+}
+
+impl<'a> From::<&'a mut Rakefile<'_>> for Info<'a> {
+    #[inline]
+    fn from(rake: &'a mut Rakefile) -> Self {
+        Self::from(&*rake)
+    }
+}
+
 #[derive(Debug)]
 pub enum RakeError<'a> {
-    // File path, tab width, row
-    InvalidIndentation(&'a str, usize, usize),
-
-    // Directory path
+    InvalidIndentation(Info<'a>, usize),
+    /// Directory path
     NoRakefileInDir(PathBuf),
+
+    /// Can be happen in case of $d[index] syntax.
+    DepsIndexOutOfBounds(Info<'a>),
+
+    /// SS -> Special Symbol
+    /// Can be happen in here:
+    /// ```
+    /// : foo.c
+    ///     mkdir -p build
+    ///     clang -o $t $d
+    /// ```
+    DepsSSwithoutDeps(Info<'a>),
+
+    /// Target is mandatory
+    NoTarget(Info<'a>)
 }
 
 impl Display for RakeError<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         use RakeError::*;
-        let expected = Rakefile::TAB_WIDTH;
+        let expected_tab_width = Rakefile::TAB_WIDTH;
         match self {
-            InvalidIndentation(file_path, width, row) => write!(f, "{file_path}:{row}: Invalid indentation, expected: {expected}, got: {width}"),
+            InvalidIndentation(info, w) => write!(f, "{f}:{r}: Invalid indentation, expected: {expected_tab_width}, got: {w}", f = info.0, r = info.1),
             NoRakefileInDir(dir) => write!(f, "No Rakefile in: `{dir}`", dir = dir.display()),
+            DepsIndexOutOfBounds(info) => write!(f, "{f}:{r}: Index out of bounds", f = info.0, r = info.1),
+            DepsSSwithoutDeps(info) => write!(f, "{f}:{r}: Special `deps` syntax without deps", f = info.0, r = info.1),
+            NoTarget(info) => write!(f, "{f}:{r}: Target is mandatory", f = info.0, r = info.1)
         }
     }
 }
