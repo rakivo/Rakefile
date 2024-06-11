@@ -49,7 +49,7 @@ where
                 if cfg!(debug_assertions) {
                     panic!("called `Option::unwrap()` on a `None` value")
                 } else {
-                    exit(1);
+                    exit(1)
                 }
             }
         }
