@@ -18,11 +18,11 @@ impl ToString for SSymbol {
             MakeTarget => "$@",
             RakeTarget => "$t",
 
-            MakeDep => "$d",
-            RakeDep => "$<",
+            MakeDep    => "$d",
+            RakeDep    => "$<",
 
-            MakeDeps => "$ds",
-            RakeDeps => "$^",
+            MakeDeps   => "$ds",
+            RakeDeps   => "$^",
         }.to_owned()
     }
 }

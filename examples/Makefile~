@@ -1,9 +1,0 @@
-all: build/foo build/bar
-
-build/foo: foo.c
-	mkdir -p build
-	clang -o $@ $<
-
-build/bar: bar.c bar.h
-	mkdir -p build
-	clang -o $@ $<
