@@ -4,10 +4,11 @@ use {
         path::PathBuf,
         fmt::{Display, Formatter},
     },
-    crate::Rakefile
 };
+use robuild::*;
+use crate::Rakefile;
 
-// File path, tab width, row
+// File path, row
 #[derive(Debug)]
 pub struct Info<'a>(pub &'a str, pub usize);
 
@@ -25,14 +26,26 @@ impl<'a> From::<&'a mut Rakefile<'_>> for Info<'a> {
     }
 }
 
+impl<'a> From::<&'a &mut Rakefile<'_>> for Info<'a> {
+    #[inline]
+    fn from(rake: &'a &mut Rakefile) -> Self {
+        Self::from(&**rake)
+    }
+}
+
 #[derive(Debug)]
 pub enum RakeError<'a> {
+    FailedToExecute(String),
+
     InvalidIndentation(Info<'a>, usize),
+
+    InvalidDependency(Info<'a>, String),
+
     /// Directory path
     NoRakefileInDir(PathBuf),
 
     /// Can be happen in case of $d[index] syntax.
-    DepsIndexOutOfBounds(Info<'a>),
+    DepsIndexOutOfBounds(Info<'a>, usize),
 
     /// SS -> Special Symbol
     /// Can be happen in here:
@@ -44,7 +57,7 @@ pub enum RakeError<'a> {
     DepsSSwithoutDeps(Info<'a>),
 
     /// Target is mandatory
-    NoTarget(Info<'a>)
+    NoTarget(Info<'a>),
 }
 
 impl Display for RakeError<'_> {
@@ -52,11 +65,13 @@ impl Display for RakeError<'_> {
         use RakeError::*;
         let expected_tab_width = Rakefile::TAB_WIDTH;
         match self {
-            InvalidIndentation(info, w) => write!(f, "{f}:{r}: Invalid indentation, expected: {expected_tab_width}, got: {w}", f = info.0, r = info.1),
-            NoRakefileInDir(dir) => write!(f, "No Rakefile in: `{dir}`", dir = dir.display()),
-            DepsIndexOutOfBounds(info) => write!(f, "{f}:{r}: Index out of bounds", f = info.0, r = info.1),
-            DepsSSwithoutDeps(info) => write!(f, "{f}:{r}: Special `deps` syntax without deps", f = info.0, r = info.1),
-            NoTarget(info) => write!(f, "{f}:{r}: Target is mandatory", f = info.0, r = info.1)
+            FailedToExecute(err)         => write!(f, "Failed to execute job: {err}"),
+            InvalidIndentation(info, w)  => write!(f, "{f}:{r}: Invalid indentation, expected: {expected_tab_width}, got: {w}", f = info.0, r = info.1),
+            InvalidDependency(info, dep) => write!(f, "{f}:{r}: Dependency: `{dep}` nor a defined job, nor existing file", f = info.0, r = info.1),
+            NoRakefileInDir(dir)         => write!(f, "No Rakefile in: `{dir}`", dir = dir.display()),
+            DepsIndexOutOfBounds(info, len)   => write!(f, "{f}:{r}: Index out of bounds, NOTE: treat your deps as zero-indexed array. Length of your deps-array is: {len}", f = info.0, r = info.1),
+            DepsSSwithoutDeps(info)      => write!(f, "{f}:{r}: Special `deps` syntax without deps", f = info.0, r = info.1),
+            NoTarget(info)               => write!(f, "{f}:{r}: Target is mandatory", f = info.0, r = info.1)
         }
     }
 }
@@ -79,7 +94,7 @@ where
         match self {
             Ok(t) => t,
             Err(e) => {
-                eprintln!("ERROR: {e}");
+                eprintln!("{lvl} {e}", lvl = LogLevel::ERROR);
                 if cfg!(debug_assertions) {
                     panic!("called `Option::unwrap()` on a `None` value")
                 } else {

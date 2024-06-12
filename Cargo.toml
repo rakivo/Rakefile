@@ -5,7 +5,8 @@ edition = "2021"
 
 [dependencies]
 regex = { version = "1.10.5", default-features = false }
-robuild = "0.0.20"
+robuild = "0.0.24"
+# robuild = { path = "../robuild" }
 
 [[bin]]
 path = "src/rake.rs"

@@ -2,8 +2,8 @@ use std::{
     env,
     result,
     str::Lines,
+    io::ErrorKind,
     path::PathBuf,
-    process::exit,
     iter::Peekable,
     default::Default,
     fs::read_to_string,
@@ -20,20 +20,27 @@ type RResult<'a, T> = result::Result::<T, RakeError<'a>>;
 
 struct Rakefile<'a> {
     row: usize,
+    cfg: Config,
     deps_re: Regex,
     file_path: String,
-    jobs: Vec::<(String, Job)>,
+    jobs: Vec::<Job>,
     iter: Peekable::<Lines<'a>>
 }
+
+/* TODO:
+    RakeJob struct, that will contain robuild::Job and
+    info about that struct, like row or something.
+*/
 
 impl Default for Rakefile<'_> {
     fn default() -> Self {
         Self {
             row: 1,
+            cfg: Config::default(),
             deps_re: Regex::new("").unwrap(),
+            iter: "".lines().peekable(),
             file_path: String::default(),
             jobs: Vec::default(),
-            iter: "".lines().peekable(),
         }
     }
 }
@@ -44,8 +51,6 @@ impl<'a> Rakefile<'a> {
 
     pub const RAKE_FILE_NAME: &'static str = "Rakefile";
     pub const DEPS_REGEX: &'static str = r"\$d\[(.*?)\]";
-
-    pub const PHONY: &'static str = ".PHONY";
 
     fn find_rakefile() -> RResult::<'a, PathBuf> {
         let dir_path = env::current_dir().unwrap_or_report();
@@ -70,15 +75,14 @@ impl<'a> Rakefile<'a> {
 
     #[inline]
     fn append_job(&mut self, job: Job) {
-        let target = job.target().to_owned();
-        self.jobs.push((target, job));
+        self.jobs.push(job);
     }
 
     fn parse_deps_ss(&self, line: &str, deps: &Vec::<&str>) -> RResult::<String> {
         for caps in self.deps_re.captures_iter(&line) {
             let idx = caps[1].parse::<usize>().unwrap_or(0);
             if deps.get(idx).is_none() {
-                return Err(RakeError::DepsIndexOutOfBounds(Info::from(self)));
+                return Err(RakeError::DepsIndexOutOfBounds(Info::from(self), deps.len()));
             }
         }
 
@@ -120,17 +124,11 @@ impl<'a> Rakefile<'a> {
         Ok(())
     }
 
-    // fn find_job_by_key(&self, key: &str) -> Option::<&Job> {
-    //     self.jobs.iter()
-    //         .find(|(k, _)| k.eq(key))
-    //         .map(|(_, j)| j)
-    // }
-
+    // TBD: Non linear search
     #[inline]
-    fn find_job_by_key_mut(&mut self, key: &str) -> Option::<&mut Job> {
+    fn find_job_by_target_mut(&mut self, target: &str) -> Option::<&mut Job> {
         self.jobs.iter_mut()
-            .find(|(k, _)| k.eq(key))
-            .map(|(_, j)| j)
+            .find(|j| j.target().eq(target))
     }
 
     fn parse_job(&mut self, idx: &usize, line: &str) -> RResult::<()> {
@@ -183,44 +181,62 @@ impl<'a> Rakefile<'a> {
             };
         }
 
-        let cmd = body.iter().fold(RobCommand::new(), |mut cmd, line| {
-            cmd.append_mv(&[line]);
-            cmd
-        });
+        let cmd = body.iter()
+            .fold(RobCommand::from(self.cfg.to_owned()), |mut cmd, line| {
+                cmd.append_mv(&[line]);
+                cmd
+            });
 
-        let phony = target == Self::PHONY;
-        let mut job = Job::new(target, deps, cmd);
-        job.phony(phony);
+        let ss_check1 = parse_special_job_by_target!(self, target, deps, cmd, phony, true, SSymbol::MakePhony, SSymbol::RakePhony);
+        let ss_check2 = parse_special_job_by_target!(self, target, deps, cmd, echo, false, SSymbol::MakeSilent);
 
-        self.append_job(job);
+        if !(ss_check1 && ss_check2) {
+            let job = Job::new(target, deps, cmd);
+            self.append_job(job);
+        }
 
         Ok(())
     }
 
-    fn job_as_dep_check(&mut self, job: &Job) -> IoResult::<()> {
-        for dep in job.deps().iter() {
-            if let Some(dep_job) = self.find_job_by_key_mut(dep) {
-                dep_job.execute_async()?;
-                let job = dep_job.to_owned();
-                self.job_as_dep_check(&job)?;
-            } else if !Rob::is_file(dep) {
-                // TBD: proper error reporting here.
-                eprintln!("You did a fucky wucky, mister programmer ;-)");
-                eprintln!("This dependency: `{dep}`, nor defined job nor file ._.");
-                exit(1);
+    // TBD: Return row of the job that has invalid dependency and not just the last one.
+    // Find a way to do that without cloning each job if it's even possible.
+    fn job_as_dep_check(&mut self, job: Job) -> RResult<&mut Self> {
+        let mut stack = vec![job];
+
+        while let Some(current_job) = stack.pop() {
+            for dep in current_job.deps().iter() {
+                if let Some(dep_job) = self.find_job_by_target_mut(&dep.to_owned()) {
+                    if let Err(err) = dep_job.execute_async() {
+                        match err.kind() {
+                            ErrorKind::NotFound => return Err(RakeError::InvalidDependency(Info::from(self), dep.to_owned())),
+                            err @ _             => return Err(RakeError::FailedToExecute(err.to_string()))
+                        };
+                    }
+                    stack.push(dep_job.to_owned());
+                } else if !Rob::is_file(&dep) {
+                    return Err(RakeError::InvalidDependency(Info::from(self), dep.to_owned()));
+                }
             }
         }
-        Ok(())
+
+        Ok(self)
     }
 
-    fn execute_job(&mut self) -> IoResult::<()> {
+    fn execute_job(&mut self) -> RResult::<()> {
         // Borrow checker SeemsGood
-        if self.jobs.first().is_some() {
-            let job = self.jobs[0].1.to_owned();
-            self.job_as_dep_check(&job)?;
-            let job = &mut self.jobs[0].1;
-            job.execute_async()?;
-        } Ok(())
+        if self.jobs.is_empty() { return Ok(()) }
+
+        let rakefile = {
+            let job = self.jobs[0].to_owned();
+            self.job_as_dep_check(job)?
+        };
+
+        let job = &mut rakefile.jobs[0];
+        if let Err(err) = job.execute_async() {
+            return Err(RakeError::FailedToExecute(err.to_string()))
+        }
+
+        Ok(())
     }
 
     fn parse_line(&mut self, line: &str) -> RResult::<()> {
@@ -229,11 +245,24 @@ impl<'a> Rakefile<'a> {
         } Ok(())
     }
 
+    const KEEPGOING_FLAG: &'static str = "-k";
+    const SILENT_FLAG: &'static str = "-s";
+
+    fn parse_flags() -> Config {
+        let args = env::args().collect::<Vec::<_>>();
+        let keepgoing = args.iter().any(|x| x == Self::KEEPGOING_FLAG);
+        let silent = args.iter().any(|x| x == Self::SILENT_FLAG);
+        let mut cfg = Config::default();
+        cfg.keepgoing(keepgoing).echo(!silent);
+        cfg
+    }
+
     fn init()  {
         let file_path = Self::find_rakefile().unwrap_or_report();
         let file_str = read_to_string(&file_path).unwrap_or_report();
 
         let mut rakefile = Rakefile {
+            cfg: Self::parse_flags(),
             deps_re: Regex::new(Self::DEPS_REGEX).unwrap(),
             file_path: Self::pretty_file_path(file_path.to_str().expect("Failed to convert file path to str")),
             iter: file_str.lines().peekable(),
@@ -253,8 +282,6 @@ fn main() {
 }
 
 /* TODO:
-    1. Jobs as dependencies of other jobs,
-    2. Special symbols: $@, $t, $d, $<, $*, %, CC,
-    3. Parse flags,
-    4. Async mode,
+    4. Async mode | Sync mode,
+    5. Variables
  */
