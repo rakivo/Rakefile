@@ -9,6 +9,11 @@ pub enum SSymbol {
 
     MakeDeps,
     RakeDeps,
+
+    MakePhony,
+    RakePhony,
+
+    MakeSilent
 }
 
 impl ToString for SSymbol {
@@ -23,6 +28,11 @@ impl ToString for SSymbol {
 
             MakeDeps   => "$ds",
             RakeDeps   => "$^",
+
+            MakePhony  => ".PHONY",
+            RakePhony  => ".ALWAYS",
+
+            MakeSilent => ".SILENT"
         }.to_owned()
     }
 }
@@ -34,4 +44,18 @@ macro_rules! sreplace {
         use SSymbol::*;
         *$line = $line.replace(&$variant.to_string(), $val);
     };
+}
+
+#[macro_export]
+macro_rules! parse_special_job_by_target {
+    ($self: ident, $tar: expr, $deps: expr, $cmd: expr, $field: tt, $val: expr, $($ss: expr), *) => {{
+        let check = [$($ss), *].iter().any(|x| x.to_string().eq($tar));
+        if check {
+            for tar_ in $deps.iter() {
+                if let Some(job) = $self.find_job_by_target_mut(tar_) {
+                    job.$field($val);
+                }
+            }
+        } check
+    }}
 }
