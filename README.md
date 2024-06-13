@@ -4,18 +4,19 @@
 
 ## See this Rakefile for example:
 ```Makefile
-all: hello build/foo build/bar
+all: hello build_dir build/foo build/bar
 
 hello:
     echo hello from Rakefile!
 
-build/foo: src/foo.c
+build_dir: build
     mkdir -p build
+
+build/foo: src/foo.c
     cc -o $t $d
 
 build/bar: src/bar.c src/bar.h
-    mkdir -p build
-    cc -o $t $d
+    cc -o $t $d[0]
 
 .ALWAYS: hello
 ```
