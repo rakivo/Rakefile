@@ -40,11 +40,6 @@ struct Rakefile<'a> {
     iter: Peekable::<Lines<'a>>
 }
 
-/* TODO:
-    RakeJob struct, that will contain robuild::Job and
-    info about that struct, like row or something.
-*/
-
 impl Default for Rakefile<'_> {
     fn default() -> Self {
         Self {
@@ -93,12 +88,13 @@ impl<'a> Rakefile<'a> {
         let key = job.0.target();
 
         if let Some(idx) = self.jobmap.get(key) {
-            let old_job = self.jobs.get(*idx).expect("UNREACHABLE");
+            let old_job = self.jobs.get(*idx).unwrap();
             let f = &job.1.0;
             let l1 = &job.1.1;
             let l2 = &old_job.1.1;
             log!(WARN, "{f}:{l1}: Overriding recipe for target: '{key}'");
             log!(WARN, "{f}:{l2}: Defined here");
+            self.jobs.remove(*idx);
         }
 
         let idx = self.jobs.len();
