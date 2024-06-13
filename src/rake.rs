@@ -210,7 +210,7 @@ impl<'a> Rakefile<'a> {
                         };
                     }
                     stack.push(dep_job.to_owned());
-                } else if !Rob::is_file(&dep) {
+                } else if !(Rob::is_file(&dep) || Rob::is_dir(&dep)) {
                     return Err(RakeError::InvalidDependency(Info::from(self), dep.to_owned()));
                 }
             }
