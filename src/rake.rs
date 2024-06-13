@@ -7,6 +7,7 @@ use std::{
     iter::Peekable,
     default::Default,
     fs::read_to_string,
+    collections::HashSet
 };
 use regex::*;
 use robuild::*;
@@ -24,6 +25,14 @@ struct Rakefile<'a> {
     deps_re: Regex,
     file_path: String,
     jobs: Vec::<Job>,
+
+    // When parsing flags, you can come across a string,
+    // that is not a defined flag, and it may be a potential job,
+    // similar to how in Makefile you can do `make examples` when `examples`
+    // is a defined job. Why potential? Because we are parsing flags before
+    // parsing `Rakefile` whether it exists or not, and after we parsed it,
+    // we can check, if the potential job is actually a defined one.
+    potential_jobs: Vec::<String>,
     iter: Peekable::<Lines<'a>>
 }
 
@@ -38,9 +47,10 @@ impl Default for Rakefile<'_> {
             row: 1,
             cfg: Config::default(),
             deps_re: Regex::new("").unwrap(),
-            iter: "".lines().peekable(),
             file_path: String::default(),
             jobs: Vec::default(),
+            potential_jobs: Vec::default(),
+            iter: "".lines().peekable(),
         }
     }
 }
@@ -245,23 +255,41 @@ impl<'a> Rakefile<'a> {
     const KEEPGOING_FLAG: &'static str = "-k";
     const SILENT_FLAG: &'static str = "-s";
 
-    fn parse_flags() -> Config {
+    fn parse_flags() -> (Config, Vec::<String>) {
         let args = env::args().collect::<Vec::<_>>();
-        let keepgoing = args.iter().any(|x| x == Self::KEEPGOING_FLAG);
-        let silent = args.iter().any(|x| x == Self::SILENT_FLAG);
+        let mut jobs = Vec::new();
+        let mut keepgoing = false;
+        let mut silent = false;
+        for s in args.into_iter() {
+            match s.as_str() {
+                Self::KEEPGOING_FLAG => keepgoing = true,
+                Self::SILENT_FLAG    => silent = true,
+                _                    => jobs.push(s.to_owned())
+            }
+        }
         let mut cfg = Config::default();
         cfg.keepgoing(keepgoing).echo(!silent);
-        cfg
+        (cfg, jobs)
+    }
+
+    fn check_potential_jobs(&mut self) -> Vec<&mut Job> {
+        let idxs = self.potential_jobs.iter()
+            .filter_map(|pjob| self.jobs.iter().position(|j| j.target().eq(pjob)))
+            .collect::<HashSet::<_>>();
+
+        // SAFETY: We are not holding multiple mutable references simultaneously
+        idxs.iter().map(|idx| unsafe { &mut *(&mut self.jobs[*idx] as *mut _) }).collect()
     }
 
     fn init()  {
         let file_path = Self::find_rakefile().unwrap_or_report();
         let file_str = read_to_string(&file_path).unwrap_or_report();
-
+        let (cfg, potential_jobs) = Self::parse_flags();
         let mut rakefile = Rakefile {
-            cfg: Self::parse_flags(),
+            cfg,
             deps_re: Regex::new(Self::DEPS_REGEX).unwrap(),
             file_path: Self::pretty_file_path(file_path.to_str().expect("Failed to convert file path to str")),
+            potential_jobs,
             iter: file_str.lines().peekable(),
             ..Self::default()
         };
@@ -270,7 +298,14 @@ impl<'a> Rakefile<'a> {
             rakefile.parse_line(&line).unwrap_or_report();
         }
 
-        rakefile.execute_job().unwrap_or_report();
+        let mut jobs = rakefile.check_potential_jobs();
+        if !jobs.is_empty() {
+            jobs.iter_mut().for_each(|j| {
+                j.execute_async().unwrap_or_report();
+            });
+        } else {
+            rakefile.execute_job().unwrap_or_report();
+        }
     }
 }
 
