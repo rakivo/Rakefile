@@ -5,6 +5,7 @@ use std::{
     io::ErrorKind,
     path::PathBuf,
     iter::Peekable,
+    process::Output,
     default::Default,
     fs::read_to_string,
     collections::{HashSet, HashMap}
@@ -210,8 +211,16 @@ impl<'a> Rakefile<'a> {
                 cmd
             });
 
-        let ss_check1 = parse_special_job_by_target!(self, target, deps, cmd, phony, true, SSymbol::MakePhony, SSymbol::RakePhony);
-        let ss_check2 = parse_special_job_by_target!(self, target, deps, cmd, echo, false, SSymbol::MakeSilent);
+        let ss_check1 = parse_special_job_by_target!(self, target,
+                                                     deps, cmd,
+                                                     phony, true,
+                                                     SSymbol::MakePhony,
+                                                     SSymbol::RakePhony);
+
+        let ss_check2 = parse_special_job_by_target!(self, target,
+                                                     deps, cmd,
+                                                     echo, false,
+                                                     SSymbol::MakeSilent);
 
         if !(ss_check1 && ss_check2) {
             let job = Job::new(target, deps, cmd);
@@ -223,22 +232,37 @@ impl<'a> Rakefile<'a> {
         Ok(())
     }
 
+    fn handle_output(&self, output: IoResult::<Vec::<Output>>, dep: String, job_info: Info, curr_job_info: Info) -> RResult::<()> {
+        match output {
+            Ok(ok) => if ok.iter().find(|out| !out.stderr.is_empty()).is_some() {
+                // Error-message will be printed itself
+                return Err(RakeError::FailedToExecute(job_info))
+            } else {
+                Ok(())
+            }
+            Err(err) => {
+                match err.kind() {
+                    ErrorKind::NotFound => return Err(RakeError::InvalidDependency(curr_job_info, dep)),
+                    _                   => return Err(RakeError::FailedToExecute(job_info))
+                };
+            }
+        }
+    }
+
     // Find a way to do that without cloning each job if it's even possible.
     fn job_as_dep_check(&mut self, job: RJob) -> RResult<&mut Self> {
         let mut stack = vec![job];
 
-        while let Some(current_job) = stack.pop() {
-            for dep in current_job.0.deps().iter() {
+        while let Some(curr_job) = stack.pop() {
+            for dep in curr_job.0.deps().iter() {
                 if let Some(dep_job) = self.find_job_by_target_mut(&dep.to_owned()) {
-                    if let Err(err) = dep_job.0.execute_async() {
-                        match err.kind() {
-                            ErrorKind::NotFound => return Err(RakeError::InvalidDependency(Info::from(self), dep.to_owned())),
-                            err @ _             => return Err(RakeError::FailedToExecute(err.to_string()))
-                        };
-                    }
                     stack.push(dep_job.to_owned());
+                    let out = dep_job.0.execute_async_dont_exit();
+                    let job_info = dep_job.1.to_owned();
+                    let curr_job_info = curr_job.1.to_owned();
+                    self.handle_output(out, dep.to_owned(), job_info, curr_job_info)?;
                 } else if !(Rob::is_file(&dep) || Rob::is_dir(&dep)) {
-                    return Err(RakeError::InvalidDependency(current_job.1, dep.to_owned()));
+                    return Err(RakeError::InvalidDependency(curr_job.1, dep.to_owned()));
                 }
             }
         }
@@ -256,8 +280,8 @@ impl<'a> Rakefile<'a> {
         };
 
         let job = &mut rakefile.jobs[0];
-        if let Err(err) = job.0.execute_async() {
-            return Err(RakeError::FailedToExecute(err.to_string()))
+        if job.0.execute_async_dont_exit().is_err() {
+            return Err(RakeError::FailedToExecute(job.1.to_owned()))
         }
 
         Ok(())

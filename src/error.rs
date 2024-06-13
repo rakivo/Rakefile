@@ -35,7 +35,7 @@ impl From::<&mut Rakefile<'_>> for Info {
 
 #[derive(Debug)]
 pub enum RakeError {
-    FailedToExecute(String),
+    FailedToExecute(Info),
 
     InvalidIndentation(Info, usize),
 
@@ -65,7 +65,7 @@ impl Display for RakeError {
         use RakeError::*;
         let expected_tab_width = Rakefile::TAB_WIDTH;
         match self {
-            FailedToExecute(err)         => write!(f, "Failed to execute job: {err}"),
+            FailedToExecute(info)         => write!(f, "{f}:{r}: Failed to execute job", f = info.0, r = info.1),
             InvalidIndentation(info, w)  => write!(f, "{f}:{r}: Invalid indentation, expected: {expected_tab_width}, got: {w}", f = info.0, r = info.1),
             InvalidDependency(info, dep) => write!(f, "{f}:{r}: Dependency: `{dep}` nor a defined job, nor existing file, nor directory", f = info.0, r = info.1),
             NoRakefileInDir(dir)         => write!(f, "No Rakefile in: `{dir}`", dir = dir.display()),

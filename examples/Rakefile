@@ -1,12 +1,12 @@
-all: hello build_dir build/foo build/bar
+all: hello build build/foo build/bar
 
 hello:
 	echo hello from Rakefile!
 
-hello: rakivo
+hello:
 	echo hello from rakivo!
 
-build_dir: build
+build:
 	mkdir -p build
 
 build/foo: src/foo.c
