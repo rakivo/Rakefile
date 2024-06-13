@@ -9,43 +9,43 @@ use robuild::*;
 use crate::Rakefile;
 
 // File path, row
-#[derive(Debug)]
-pub struct Info<'a>(pub &'a str, pub usize);
+#[derive(Debug, Clone)]
+pub struct Info(pub String, pub usize);
 
-impl<'a> From::<&'a Rakefile<'_>> for Info<'a> {
+impl From::<Rakefile<'_>> for Info {
     #[inline]
-    fn from(rake: &'a Rakefile) -> Self {
-        Self(&rake.file_path, rake.row)
+    fn from(rake: Rakefile) -> Self {
+        Self(rake.file_path.to_owned(), rake.row)
     }
 }
 
-impl<'a> From::<&'a mut Rakefile<'_>> for Info<'a> {
+impl From::<&Rakefile<'_>> for Info {
     #[inline]
-    fn from(rake: &'a mut Rakefile) -> Self {
+    fn from(rake: &Rakefile) -> Self {
+        Self(rake.file_path.to_owned(), rake.row)
+    }
+}
+
+impl From::<&mut Rakefile<'_>> for Info {
+    #[inline]
+    fn from(rake: &mut Rakefile) -> Self {
         Self::from(&*rake)
     }
 }
 
-impl<'a> From::<&'a &mut Rakefile<'_>> for Info<'a> {
-    #[inline]
-    fn from(rake: &'a &mut Rakefile) -> Self {
-        Self::from(&**rake)
-    }
-}
-
 #[derive(Debug)]
-pub enum RakeError<'a> {
+pub enum RakeError {
     FailedToExecute(String),
 
-    InvalidIndentation(Info<'a>, usize),
+    InvalidIndentation(Info, usize),
 
-    InvalidDependency(Info<'a>, String),
+    InvalidDependency(Info, String),
 
     /// Directory path
     NoRakefileInDir(PathBuf),
 
     /// Can be happen in case of $d[index] syntax.
-    DepsIndexOutOfBounds(Info<'a>, usize),
+    DepsIndexOutOfBounds(Info, usize),
 
     /// SS -> Special Symbol
     /// Can be happen in here:
@@ -54,14 +54,14 @@ pub enum RakeError<'a> {
     ///     mkdir -p build
     ///     clang -o $t $d
     /// ```
-    DepsSSwithoutDeps(Info<'a>),
+    DepsSSwithoutDeps(Info),
 
     /// Target is mandatory
-    NoTarget(Info<'a>),
+    NoTarget(Info),
 }
 
-impl Display for RakeError<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl Display for RakeError {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         use RakeError::*;
         let expected_tab_width = Rakefile::TAB_WIDTH;
         match self {

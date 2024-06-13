@@ -7,7 +7,7 @@ use std::{
     iter::Peekable,
     default::Default,
     fs::read_to_string,
-    collections::HashSet
+    collections::{HashSet, HashMap}
 };
 use regex::*;
 use robuild::*;
@@ -17,14 +17,18 @@ use error::*;
 mod ss;
 use ss::*;
 
-type RResult<'a, T> = result::Result::<T, RakeError<'a>>;
+type RResult<'a, T> = result::Result::<T, RakeError>;
+
+#[derive(Clone)]
+struct RJob(Job, Info);
 
 struct Rakefile<'a> {
     row: usize,
     cfg: Config,
     deps_re: Regex,
     file_path: String,
-    jobs: Vec::<Job>,
+    jobs: Vec::<RJob>,
+    jobmap: HashMap::<String, usize>,
 
     // When parsing flags, you can come across a string,
     // that is not a defined flag, and it may be a potential job,
@@ -49,6 +53,7 @@ impl Default for Rakefile<'_> {
             deps_re: Regex::new("").unwrap(),
             file_path: String::default(),
             jobs: Vec::default(),
+            jobmap: HashMap::default(),
             potential_jobs: Vec::default(),
             iter: "".lines().peekable(),
         }
@@ -84,7 +89,20 @@ impl<'a> Rakefile<'a> {
     }
 
     #[inline]
-    fn append_job(&mut self, job: Job) {
+    fn append_job(&mut self, job: RJob) {
+        let key = job.0.target();
+
+        if let Some(idx) = self.jobmap.get(key) {
+            let old_job = self.jobs.get(*idx).expect("UNREACHABLE");
+            let f = &job.1.0;
+            let l1 = &job.1.1;
+            let l2 = &old_job.1.1;
+            log!(WARN, "{f}:{l1}: Overriding recipe for target: '{key}'");
+            log!(WARN, "{f}:{l2}: Defined here");
+        }
+
+        let idx = self.jobs.len();
+        self.jobmap.insert(key.to_owned(), idx);
         self.jobs.push(job);
     }
 
@@ -138,7 +156,8 @@ impl<'a> Rakefile<'a> {
     #[inline]
     fn find_job_by_target_mut(&mut self, target: &str) -> Option::<&mut Job> {
         self.jobs.iter_mut()
-            .find(|j| j.target().eq(target))
+            .find(|j| j.0.target().eq(target))
+            .map(|r| &mut r.0)
     }
 
     fn parse_job(&mut self, idx: &usize, line: &str) -> RResult::<()> {
@@ -157,6 +176,8 @@ impl<'a> Rakefile<'a> {
         let deps_joined = deps.join(" ");
 
         let mut body = Vec::new();
+
+        let signature_row = self.row;
         while let Some(next_line) = self.iter.peek() {
             self.row += 1;
 
@@ -199,7 +220,9 @@ impl<'a> Rakefile<'a> {
 
         if !(ss_check1 && ss_check2) {
             let job = Job::new(target, deps, cmd);
-            self.append_job(job);
+            let info = Info(self.file_path.to_owned(), signature_row);
+            let rjob = RJob(job, info);
+            self.append_job(rjob);
         }
 
         Ok(())
@@ -235,11 +258,11 @@ impl<'a> Rakefile<'a> {
 
         let rakefile = {
             let job = self.jobs[0].to_owned();
-            self.job_as_dep_check(job)?
+            self.job_as_dep_check(job.0)?
         };
 
         let job = &mut rakefile.jobs[0];
-        if let Err(err) = job.execute_async() {
+        if let Err(err) = job.0.execute_async() {
             return Err(RakeError::FailedToExecute(err.to_string()))
         }
 
@@ -273,12 +296,12 @@ impl<'a> Rakefile<'a> {
     }
 
     fn check_potential_jobs(&mut self) -> Vec<&mut Job> {
-        let idxs = self.potential_jobs.iter()
-            .filter_map(|pjob| self.jobs.iter().position(|j| j.target().eq(pjob)))
-            .collect::<HashSet::<_>>();
-
         // SAFETY: We are not holding multiple mutable references simultaneously
-        idxs.iter().map(|idx| unsafe { &mut *(&mut self.jobs[*idx] as *mut _) }).collect()
+        self.potential_jobs.iter()
+            .filter_map(|pjob| self.jobs.iter().position(|j| j.0.target().eq(pjob)))
+            .collect::<HashSet::<_>>()
+            .iter()
+            .map(|idx| unsafe { &mut *(&mut self.jobs[*idx].0 as *mut _) }).collect()
     }
 
     fn init()  {
