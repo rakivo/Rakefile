@@ -94,7 +94,7 @@ where
         match self {
             Ok(t) => t,
             Err(e) => {
-                eprintln!("{lvl} {e}", lvl = LogLevel::ERROR);
+                eprintln!("{lvl} {e}", lvl = LogLevel::PANIC);
                 if cfg!(debug_assertions) {
                     panic!("called `Option::unwrap()` on a `None` value")
                 } else {
