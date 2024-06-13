@@ -232,19 +232,24 @@ impl<'a> Rakefile<'a> {
         Ok(())
     }
 
-    fn handle_output(&self, output: IoResult::<Vec::<Output>>, dep: String, job_info: Info, curr_job_info: Info) -> RResult::<()> {
+    fn handle_output
+    (
+        &self,
+        output: IoResult::<Vec::<Output>>,
+        dep: String,
+        job_info: Info,
+        curr_job_info: Info
+    ) -> RResult::<()>
+    {
         match output {
             Ok(ok) => if ok.iter().find(|out| !out.stderr.is_empty()).is_some() {
-                // Error-message will be printed itself
-                return Err(RakeError::FailedToExecute(job_info))
+                // Error-message printing handled in robuild: https://github.com/rakivo/robuild
+                Err(RakeError::FailedToExecute(job_info))
+            } else { Ok(()) }
+            Err(err) => if err.kind().eq(&ErrorKind::NotFound) {
+                Err(RakeError::InvalidDependency(curr_job_info, dep))
             } else {
-                Ok(())
-            }
-            Err(err) => {
-                match err.kind() {
-                    ErrorKind::NotFound => return Err(RakeError::InvalidDependency(curr_job_info, dep)),
-                    _                   => return Err(RakeError::FailedToExecute(job_info))
-                };
+                Err(RakeError::FailedToExecute(curr_job_info))
             }
         }
     }
@@ -281,10 +286,11 @@ impl<'a> Rakefile<'a> {
 
         let job = &mut rakefile.jobs[0];
         if job.0.execute_async_dont_exit().is_err() {
-            return Err(RakeError::FailedToExecute(job.1.to_owned()))
+            // Error-message printing handled in robuild: https://github.com/rakivo/robuild
+            Err(RakeError::FailedToExecute(job.1.to_owned()))
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
 
     fn parse_line(&mut self, line: &str) -> RResult::<()> {
