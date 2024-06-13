@@ -3,6 +3,9 @@ all: hello build_dir build/foo build/bar
 hello:
 	echo hello from Rakefile!
 
+hello:
+	echo hello from rakivo!
+
 build_dir: build
 	mkdir -p build
 
