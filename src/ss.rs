@@ -53,7 +53,7 @@ macro_rules! parse_special_job_by_target {
         if check {
             for tar_ in $deps.iter() {
                 if let Some(job) = $self.find_job_by_target_mut(tar_) {
-                    job.$field($val);
+                    job.0.$field($val);
                 }
             }
         } check
