@@ -3,7 +3,7 @@ all: hello build_dir build/foo build/bar
 hello:
 	echo hello from Rakefile!
 
-hello:
+hello: rakivo
 	echo hello from rakivo!
 
 build_dir: build

@@ -150,10 +150,9 @@ impl<'a> Rakefile<'a> {
 
     // TBD: Non linear search
     #[inline]
-    fn find_job_by_target_mut(&mut self, target: &str) -> Option::<&mut Job> {
+    fn find_job_by_target_mut(&mut self, target: &str) -> Option::<&mut RJob> {
         self.jobs.iter_mut()
             .find(|j| j.0.target().eq(target))
-            .map(|r| &mut r.0)
     }
 
     fn parse_job(&mut self, idx: &usize, line: &str) -> RResult::<()> {
@@ -224,15 +223,14 @@ impl<'a> Rakefile<'a> {
         Ok(())
     }
 
-    // TBD: Return row of the job that has invalid dependency and not just the last one.
     // Find a way to do that without cloning each job if it's even possible.
-    fn job_as_dep_check(&mut self, job: Job) -> RResult<&mut Self> {
+    fn job_as_dep_check(&mut self, job: RJob) -> RResult<&mut Self> {
         let mut stack = vec![job];
 
         while let Some(current_job) = stack.pop() {
-            for dep in current_job.deps().iter() {
+            for dep in current_job.0.deps().iter() {
                 if let Some(dep_job) = self.find_job_by_target_mut(&dep.to_owned()) {
-                    if let Err(err) = dep_job.execute_async() {
+                    if let Err(err) = dep_job.0.execute_async() {
                         match err.kind() {
                             ErrorKind::NotFound => return Err(RakeError::InvalidDependency(Info::from(self), dep.to_owned())),
                             err @ _             => return Err(RakeError::FailedToExecute(err.to_string()))
@@ -240,7 +238,7 @@ impl<'a> Rakefile<'a> {
                     }
                     stack.push(dep_job.to_owned());
                 } else if !(Rob::is_file(&dep) || Rob::is_dir(&dep)) {
-                    return Err(RakeError::InvalidDependency(Info::from(self), dep.to_owned()));
+                    return Err(RakeError::InvalidDependency(current_job.1, dep.to_owned()));
                 }
             }
         }
@@ -254,7 +252,7 @@ impl<'a> Rakefile<'a> {
 
         let rakefile = {
             let job = self.jobs[0].to_owned();
-            self.job_as_dep_check(job.0)?
+            self.job_as_dep_check(job)?
         };
 
         let job = &mut rakefile.jobs[0];
