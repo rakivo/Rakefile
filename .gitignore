@@ -1,7 +1,4 @@
 /target
-Rakefile
 Makefile
 Cargo.lock
-*.c
-*.h
 build

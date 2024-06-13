@@ -139,12 +139,9 @@ impl<'a> Rakefile<'a> {
             return Err(RakeError::NoTarget(Info::from(self)))
         }
 
-        let deps_str = deps_untrimmed.chars()
-            .skip_while(|c| c.is_whitespace() || c.eq(&':'))
-            .collect::<String>();
-
-        let deps = deps_str
+        let deps = deps_untrimmed
             .split_whitespace()
+            .skip(1)
             .collect::<Vec::<_>>();
 
         let deps_joined = deps.join(" ");
@@ -283,5 +280,8 @@ fn main() {
 
 /* TODO:
     4. Async mode | Sync mode,
-    5. Variables
+    5. Variables and :=, ?=, += syntax.
+    6. @ Syntax to disable echo for specific line,
+    7. % syntax for pattern matching.
+    8. Run specific jobs by passing flags
  */
