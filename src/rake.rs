@@ -80,11 +80,6 @@ impl<'a> Rakefile<'a> {
     }
 
     #[inline]
-    fn advance(&mut self) {
-        self.iter.next();
-    }
-
-    #[inline]
     fn append_job(&mut self, job: RJob) {
         let key = job.0.target();
 
@@ -156,6 +151,11 @@ impl<'a> Rakefile<'a> {
             .find(|j| j.0.target().eq(target))
     }
 
+    #[inline(always)]
+    fn advance(&mut self) {
+        self.iter.next();
+    }
+
     fn parse_job(&mut self, idx: &usize, line: &str) -> RResult::<()> {
         let (target_untrimmed, deps_untrimmed) = line.split_at(*idx);
         let target = target_untrimmed.trim();
@@ -171,9 +171,9 @@ impl<'a> Rakefile<'a> {
 
         let deps_joined = deps.join(" ");
 
-        let mut body = Vec::new();
-
         let signature_row = self.row;
+
+        let mut body = Vec::new();
         while let Some(next_line) = self.iter.peek() {
             self.row += 1;
 
@@ -234,12 +234,11 @@ impl<'a> Rakefile<'a> {
 
     fn handle_output
     (
-        &self,
         output: IoResult::<Vec::<Output>>,
         dep: String,
         job_info: Info,
         curr_job_info: Info
-    ) -> RResult::<()>
+    ) -> RResult::<'a, ()>
     {
         match output {
             Ok(ok) => if ok.iter().find(|out| !out.stderr.is_empty()).is_some() {
@@ -265,7 +264,7 @@ impl<'a> Rakefile<'a> {
                     let out = dep_job.0.execute_async_dont_exit();
                     let job_info = dep_job.1.to_owned();
                     let curr_job_info = curr_job.1.to_owned();
-                    self.handle_output(out, dep.to_owned(), job_info, curr_job_info)?;
+                    Self::handle_output(out, dep.to_owned(), job_info, curr_job_info)?;
                 } else if !(Rob::is_file(&dep) || Rob::is_dir(&dep)) {
                     return Err(RakeError::InvalidDependency(curr_job.1, dep.to_owned()));
                 }
@@ -275,16 +274,8 @@ impl<'a> Rakefile<'a> {
         Ok(self)
     }
 
-    fn execute_job(&mut self) -> RResult::<()> {
-        // Borrow checker SeemsGood
-        if self.jobs.is_empty() { return Ok(()) }
-
-        let rakefile = {
-            let job = self.jobs[0].to_owned();
-            self.job_as_dep_check(job)?
-        };
-
-        let job = &mut rakefile.jobs[0];
+    fn execute_job(&mut self, mut job: RJob) -> RResult::<()> {
+        self.job_as_dep_check(job.to_owned())?;
         if job.0.execute_async_dont_exit().is_err() {
             // Error-message printing handled in robuild: https://github.com/rakivo/robuild
             Err(RakeError::FailedToExecute(job.1.to_owned()))
@@ -319,13 +310,13 @@ impl<'a> Rakefile<'a> {
         (cfg, jobs)
     }
 
-    fn check_potential_jobs(&mut self) -> Vec<&mut Job> {
-        // SAFETY: We are not holding multiple mutable references simultaneously
+    fn check_potential_jobs(&mut self) -> Vec<RJob> {
         self.potential_jobs.iter()
             .filter_map(|pjob| self.jobs.iter().position(|j| j.0.target().eq(pjob)))
             .collect::<HashSet::<_>>()
             .iter()
-            .map(|idx| unsafe { &mut *(&mut self.jobs[*idx].0 as *mut _) }).collect()
+            .map(|idx| self.jobs[*idx].to_owned())
+            .collect()
     }
 
     fn init()  {
@@ -345,14 +336,15 @@ impl<'a> Rakefile<'a> {
             rakefile.parse_line(&line).unwrap_or_report();
         }
 
-        let mut jobs = rakefile.check_potential_jobs();
-        if !jobs.is_empty() {
-            jobs.iter_mut().for_each(|j| {
-                j.execute_async().unwrap_or_report();
-            });
+        let pot_jobs = rakefile.check_potential_jobs();
+
+        let jobs = if !pot_jobs.is_empty() {
+            pot_jobs
         } else {
-            rakefile.execute_job().unwrap_or_report();
-        }
+            vec![rakefile.jobs[0].to_owned()]
+        };
+
+        jobs.into_iter().for_each(|j| rakefile.execute_job(j).unwrap_or_report());
     }
 }
 
@@ -365,5 +357,4 @@ fn main() {
     5. Variables and :=, ?=, += syntax.
     6. @ Syntax to disable echo for specific line,
     7. % syntax for pattern matching.
-    8. Run specific jobs by passing flags
  */
