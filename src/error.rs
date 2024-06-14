@@ -65,13 +65,13 @@ impl Display for RakeError {
         use RakeError::*;
         let expected_tab_width = Rakefile::TAB_WIDTH;
         match self {
-            FailedToExecute(info)         => write!(f, "{f}:{r}: Failed to execute job", f = info.0, r = info.1),
-            InvalidIndentation(info, w)  => write!(f, "{f}:{r}: Invalid indentation, expected: {expected_tab_width}, got: {w}", f = info.0, r = info.1),
-            InvalidDependency(info, dep) => write!(f, "{f}:{r}: Dependency: `{dep}` nor a defined job, nor existing file, nor directory", f = info.0, r = info.1),
-            NoRakefileInDir(dir)         => write!(f, "No Rakefile in: `{dir}`", dir = dir.display()),
-            DepsIndexOutOfBounds(info, len)   => write!(f, "{f}:{r}: Index out of bounds, NOTE: treat your deps as zero-indexed array. Length of your deps-array is: {len}", f = info.0, r = info.1),
-            DepsSSwithoutDeps(info)      => write!(f, "{f}:{r}: Special `deps` syntax without deps", f = info.0, r = info.1),
-            NoTarget(info)               => write!(f, "{f}:{r}: Target is mandatory", f = info.0, r = info.1)
+            FailedToExecute(info)           => write!(f, "{f}:{r}: Failed to execute job", f = info.0, r = info.1),
+            InvalidIndentation(info, w)     => write!(f, "{f}:{r}: Invalid indentation, expected: {expected_tab_width}, got: {w}", f = info.0, r = info.1),
+            InvalidDependency(info, dep)    => write!(f, "{f}:{r}: Dependency: `{dep}` nor a defined job, nor existing file, nor directory", f = info.0, r = info.1),
+            NoRakefileInDir(dir)            => write!(f, "No Rakefile in: `{dir}`", dir = dir.display()),
+            DepsIndexOutOfBounds(info, len) => write!(f, "{f}:{r}: Index out of bounds, NOTE: treat your deps as zero-indexed array. Length of your deps-array is: {len}", f = info.0, r = info.1),
+            DepsSSwithoutDeps(info)         => write!(f, "{f}:{r}: Special `deps` syntax without deps", f = info.0, r = info.1),
+            NoTarget(info)                  => write!(f, "{f}:{r}: Target is mandatory", f = info.0, r = info.1)
         }
     }
 }

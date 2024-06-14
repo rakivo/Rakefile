@@ -1,10 +1,9 @@
 all: hello build build/foo build/bar
 
-hello:
-	echo hello from Rakefile!
+hello1: hello build/foo
 
 hello:
-	echo hello from rakivo!
+	echo hello from Rakefile!
 
 build:
 	mkdir -p build
@@ -15,4 +14,4 @@ build/foo: src/foo.c
 build/bar: src/bar.c src/bar.h
 	cc -o $t $d[0]
 
-.ALWAYS: hello
+.ALWAYS: hello build/foo
