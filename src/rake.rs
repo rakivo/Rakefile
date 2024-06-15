@@ -267,7 +267,7 @@ impl<'a> Rakefile<'a> {
     ) -> RResult::<()>
     {
         match output {
-            Ok(ok) => if ok.iter().find(|out| !out.stderr.is_empty()).is_some() {
+            Ok(ok) => if ok.iter().find(|out| !out.stderr.is_empty()).is_some() && !self.cfg.keepgoing {
                 // Error-message printing handled in robuild: https://github.com/rakivo/robuild
                 Err(RakeError::FailedToExecute(dep_job_info))
             } else { Ok(()) }
@@ -302,7 +302,7 @@ impl<'a> Rakefile<'a> {
 
     fn execute_job(&mut self, mut job: RJob) -> RResult::<()> {
         self.job_as_dep_check(job.to_owned())?;
-        if job.0.execute_async_dont_exit().is_err() {
+        if job.0.execute_async_dont_exit().is_err() && !self.cfg.keepgoing {
             // Error-message printing handled in robuild: https://github.com/rakivo/robuild
             Err(RakeError::FailedToExecute(job.1.to_owned()))
         } else {
@@ -408,7 +408,9 @@ impl<'a> Rakefile<'a> {
             vec![rakefile.jobs[0].to_owned()]
         };
 
-        jobs.into_iter().for_each(|j| rakefile.execute_job(j).unwrap_or_report());
+        jobs.into_iter().for_each(|j| {
+            rakefile.execute_job(j).unwrap_or_report()
+        });
     }
 }
 

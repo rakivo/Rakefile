@@ -1,5 +1,6 @@
 use std::process::exit;
 
+// NOTE: Update `supported flags` message if you updated this enum:
 pub enum Flag {
     Keepgoing,
     Silent
@@ -27,6 +28,7 @@ impl TryFrom::<&str> for Flag {
             "-s" => Ok(Silent),
             _    => {
                 eprintln!("Unsupported flag: `{val}`");
+                eprintln!("Supported flags: `-k`, `-s`");
                 if cfg!(debug_assertions) {
                     todo!()
                 } else {
