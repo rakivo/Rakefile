@@ -3,7 +3,10 @@ name = rakivo
 build = build
 
 # You can use your variables just like in Makefile
-all: $(name) print_target print_deps test_silent
+all: fail_test $(name) print_target print_deps test_silent
+
+fail_test: src/foo.c
+	cc -o build/$@ $d
 
 $(name):
 	echo hello $(name)!
