@@ -2,3 +2,4 @@
 Makefile
 Cargo.lock
 build
+*.txt

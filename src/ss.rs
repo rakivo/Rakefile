@@ -42,7 +42,7 @@ macro_rules! sreplace {
     ($line: expr, $variant: tt, $val: expr) => {
         #[allow(unused)]
         use SSymbol::*;
-        *$line = $line.replace(&$variant.to_string(), $val);
+        $line = $line.replace(&$variant.to_string(), $val);
     };
 }
 

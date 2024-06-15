@@ -18,16 +18,21 @@ use error::*;
 mod ss;
 use ss::*;
 
-type RResult<'a, T> = result::Result::<T, RakeError>;
+type RResult<T> = result::Result::<T, RakeError>;
 
 #[derive(Clone)]
 struct RJob(Job, Info);
 
 struct Rakefile<'a> {
     row: usize,
+
     cfg: Config,
+
     deps_re: Regex,
+    vars_re: Regex,
+
     file_path: String,
+
     jobs: Vec::<RJob>,
     jobmap: HashMap::<String, usize>,
 
@@ -38,6 +43,9 @@ struct Rakefile<'a> {
     // parsing `Rakefile` whether it exists or not, and after we parsed it,
     // we can check, if the potential job is actually a defined one.
     potential_jobs: Vec::<String>,
+
+    vars: HashMap::<&'a str, String>,
+
     iter: Peekable::<Lines<'a>>
 }
 
@@ -47,10 +55,12 @@ impl Default for Rakefile<'_> {
             row: 1,
             cfg: Config::default(),
             deps_re: Regex::new("").unwrap(),
+            vars_re: Regex::new("").unwrap(),
             file_path: String::default(),
             jobs: Vec::default(),
             jobmap: HashMap::default(),
             potential_jobs: Vec::default(),
+            vars: HashMap::default(),
             iter: "".lines().peekable(),
         }
     }
@@ -61,9 +71,11 @@ impl<'a> Rakefile<'a> {
     pub const MAX_DIR_LVL: usize = 2;
 
     pub const RAKE_FILE_NAME: &'static str = "Rakefile";
-    pub const DEPS_REGEX: &'static str = r"\$d\[(.*?)\]";
 
-    fn find_rakefile() -> RResult::<'a, PathBuf> {
+    pub const DEPS_REGEX: &'static str = r"\$d\[(.*?)\]";
+    pub const VARS_REGEX: &'static str = r"\$\((.*?)\)";
+
+    fn find_rakefile() -> RResult::<PathBuf> {
         let dir_path = env::current_dir().unwrap_or_report();
         let dir = Dir::new(&dir_path);
         dir.into_iter()
@@ -84,17 +96,16 @@ impl<'a> Rakefile<'a> {
         let key = job.0.target();
 
         if let Some(idx) = self.jobmap.get(key) {
-            let old_job = self.jobs.get(*idx).unwrap();
+            let old_job = self.jobs.get(*idx).unwrap_or_else(|| {
+                panic!("This certanily shouldn't have happened")
+            });
             let f = &job.1.0;
-            let l1 = &job.1.1;
-            let l2 = &old_job.1.1;
-            log!(WARN, "{f}:{l1}: Overriding recipe for target: '{key}'");
-            log!(WARN, "{f}:{l2}: Defined here");
+            log!(WARN, "{f}:{l1}: Overriding recipe for target: '{key}'", l1 = job.1.1);
+            log!(WARN, "{f}:{l2}: Defined here", l2 = old_job.1.1);
             self.jobs.remove(*idx);
         }
 
-        let idx = self.jobs.len();
-        self.jobmap.insert(key.to_owned(), idx);
+        self.jobmap.insert(key.to_owned(), self.jobs.len());
         self.jobs.push(job);
     }
 
@@ -117,16 +128,19 @@ impl<'a> Rakefile<'a> {
     fn parse_special_symbols
     (
         &self,
-        target:      &str,
+        target: &str,
         deps_joined: &str,
         deps: &Vec::<&str>,
-        line: &mut String
-    ) -> RResult::<()>
+        line: &str
+    ) -> RResult::<String>
     {
-        *line = self.parse_deps_ss(&line, &deps)?;
+        let mut line = self.parse_deps_ss(&line, &deps)?;
 
         sreplace!(line, MakeTarget, &target);
         sreplace!(line, RakeTarget, &target);
+
+        sreplace!(line, MakeDeps, &deps_joined);
+        sreplace!(line, RakeDeps, &deps_joined);
 
         if line.contains(&SSymbol::MakeDep.to_string())
         || line.contains(&SSymbol::RakeDep.to_string())
@@ -138,17 +152,22 @@ impl<'a> Rakefile<'a> {
             sreplace!(line, RakeDep, &first_dep);
         }
 
-        sreplace!(line, MakeDeps, &deps_joined);
-        sreplace!(line, RakeDeps, &deps_joined);
-
-        Ok(())
+        Ok(line)
     }
 
-    // TBD: Non linear search
-    #[inline]
+    fn parse_vars(&self, line: &str) -> RResult::<String> {
+        for caps in self.vars_re.captures_iter(&line) {
+            if self.vars.get(&caps[1]).is_none() {
+                return Err(RakeError::InvalidValue(Info::from(self), caps[1].to_owned()))
+            }
+        }
+
+        Ok(self.vars_re.replace_all(&line, |caps: &Captures| self.vars.get(&caps[1]).unwrap()).to_string())
+    }
+
+    #[inline(always)]
     fn find_job_by_target_mut(&mut self, target: &str) -> Option::<&mut RJob> {
-        self.jobs.iter_mut()
-            .find(|j| j.0.target().eq(target))
+        self.jobs.iter_mut().find(|j| j.0.target().eq(target))
     }
 
     #[inline(always)]
@@ -156,8 +175,10 @@ impl<'a> Rakefile<'a> {
         self.iter.next();
     }
 
-    fn parse_job(&mut self, idx: &usize, line: &str) -> RResult::<()> {
-        let (target_untrimmed, deps_untrimmed) = line.split_at(*idx);
+    fn parse_job(&mut self, line: &str) -> RResult::<()> {
+        let line = self.parse_vars(&line)?;
+        let new_idx = line.chars().position(|x| x.eq(&':')).unwrap();
+        let (target_untrimmed, deps_untrimmed) = line.split_at(new_idx);
         let target = target_untrimmed.trim();
 
         if target.is_empty() {
@@ -170,28 +191,30 @@ impl<'a> Rakefile<'a> {
             .collect::<Vec::<_>>();
 
         let deps_joined = deps.join(" ");
-
-        let signature_row = self.row;
-
+        let signature_row = self.row + 1;
         let mut body = Vec::new();
         while let Some(next_line) = self.iter.peek() {
+            let line = next_line.to_owned();
+            if line.starts_with('#') {
+                self.advance();
+                self.row += 1;
+                continue
+            }
+
+            let line = self.parse_special_symbols(&target, &deps_joined, &deps, &line)?;
+            let line = self.parse_vars(&line)?;
+
             self.row += 1;
-
-            let mut next_line = (*next_line).to_owned();
-            self.parse_special_symbols(&target, &deps_joined,
-                                       &deps, &mut next_line)
-                .unwrap_or_report();
-
-            let trimmed = next_line.trim().to_owned();
+            let trimmed = line.trim().to_owned();
 
             // Allow people to use both tabs and spaces
-            if next_line.starts_with('\t') {
+            if line.starts_with('\t') {
                 body.push(trimmed);
                 self.advance();
                 continue
             }
 
-            let whitespace_count = next_line.chars()
+            let whitespace_count = line.chars()
                 .take_while(|c| c.is_whitespace())
                 .count();
 
@@ -234,16 +257,17 @@ impl<'a> Rakefile<'a> {
 
     fn handle_output
     (
+        &self,
         output: IoResult::<Vec::<Output>>,
         dep: String,
-        job_info: Info,
+        dep_job_info: Info,
         curr_job_info: Info
-    ) -> RResult::<'a, ()>
+    ) -> RResult::<()>
     {
         match output {
             Ok(ok) => if ok.iter().find(|out| !out.stderr.is_empty()).is_some() {
                 // Error-message printing handled in robuild: https://github.com/rakivo/robuild
-                Err(RakeError::FailedToExecute(job_info))
+                Err(RakeError::FailedToExecute(dep_job_info))
             } else { Ok(()) }
             Err(err) => if err.kind().eq(&ErrorKind::NotFound) {
                 Err(RakeError::InvalidDependency(curr_job_info, dep))
@@ -262,9 +286,9 @@ impl<'a> Rakefile<'a> {
                 if let Some(dep_job) = self.find_job_by_target_mut(&dep.to_owned()) {
                     stack.push(dep_job.to_owned());
                     let out = dep_job.0.execute_async_dont_exit();
-                    let job_info = dep_job.1.to_owned();
+                    let dep_job_info = dep_job.1.to_owned();
                     let curr_job_info = curr_job.1.to_owned();
-                    Self::handle_output(out, dep.to_owned(), job_info, curr_job_info)?;
+                    self.handle_output(out, dep.to_owned(), dep_job_info, curr_job_info)?;
                 } else if !(Rob::is_file(&dep) || Rob::is_dir(&dep)) {
                     return Err(RakeError::InvalidDependency(curr_job.1, dep.to_owned()));
                 }
@@ -284,10 +308,45 @@ impl<'a> Rakefile<'a> {
         }
     }
 
-    fn parse_line(&mut self, line: &str) -> RResult::<()> {
-        if let Some(colon_idx) = line.chars().position(|x| x == ':') {
-            self.parse_job(&colon_idx, line)?;
-        } Ok(())
+    fn parse_variable_declaration(&mut self, idx: usize, line: &'a str) -> RResult::<()> {
+        let (name_untrimmed, value_untrimmed) = line.split_at(idx);
+        let name = name_untrimmed.trim();
+
+        if value_untrimmed.split_whitespace().skip(1).count() > 1 {
+            return Err(RakeError::MultipleValues(Info::from(self)))
+        }
+
+        let value_trimmed = value_untrimmed.split_whitespace()
+            .skip(1)
+            .collect::<String>();
+
+        let value = if value_trimmed.starts_with("$(") && value_trimmed.ends_with(')') {
+            match self.vars.get(&value_trimmed[2..value_trimmed.len() - 1]) {
+                Some(val) => val.to_owned(),
+                _ => return Err(RakeError::InvalidValue(Info::from(self), value_trimmed.to_owned()))
+            }
+        } else {
+            value_trimmed
+        };
+
+        self.vars.insert(name, value);
+        self.row += 1;
+
+        Ok(())
+    }
+
+    fn parse_line(&mut self, line: &'a str) -> RResult::<()> {
+        if line.starts_with('#') {
+            self.row += 1;
+        } else if line.chars().find(|x| x.eq(&':')).is_some() {
+            self.parse_job(line)?;
+
+        } else if let Some(eq_idx) = line.chars().position(|x| x.eq(&'=')) {
+            self.parse_variable_declaration(eq_idx, line)?;
+        } else if !line.trim().is_empty() {
+            panic!("Wtf is dis scheisse: `{line}` ??? ");
+        }
+        Ok(())
     }
 
     const KEEPGOING_FLAG: &'static str = "-k";
@@ -326,6 +385,7 @@ impl<'a> Rakefile<'a> {
         let mut rakefile = Rakefile {
             cfg,
             deps_re: Regex::new(Self::DEPS_REGEX).unwrap(),
+            vars_re: Regex::new(Self::VARS_REGEX).unwrap(),
             file_path: Self::pretty_file_path(file_path.to_str().expect("Failed to convert file path to str")),
             potential_jobs,
             iter: file_str.lines().peekable(),

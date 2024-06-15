@@ -58,6 +58,10 @@ pub enum RakeError {
 
     /// Target is mandatory
     NoTarget(Info),
+
+    MultipleValues(Info),
+
+    InvalidValue(Info, String)
 }
 
 impl Display for RakeError {
@@ -71,7 +75,9 @@ impl Display for RakeError {
             NoRakefileInDir(dir)            => write!(f, "No Rakefile in: `{dir}`", dir = dir.display()),
             DepsIndexOutOfBounds(info, len) => write!(f, "{f}:{r}: Index out of bounds, NOTE: treat your deps as zero-indexed array. Length of your deps-array is: {len}", f = info.0, r = info.1),
             DepsSSwithoutDeps(info)         => write!(f, "{f}:{r}: Special `deps` syntax without deps", f = info.0, r = info.1),
-            NoTarget(info)                  => write!(f, "{f}:{r}: Target is mandatory", f = info.0, r = info.1)
+            NoTarget(info)                  => write!(f, "{f}:{r}: Target is mandatory", f = info.0, r = info.1),
+            MultipleValues(info)            => write!(f, "{f}:{r}: Provide only one value", f = info.0, r = info.1),
+            InvalidValue(info, value) => write!(f, "{f}:{r}: Invalid value: {value}", f = info.0, r = info.1),
         }
     }
 }
