@@ -17,6 +17,8 @@ mod error;
 use error::*;
 mod ss;
 use ss::*;
+mod flag;
+use flag::*;
 
 type RResult<T> = result::Result::<T, RakeError>;
 
@@ -97,7 +99,7 @@ impl<'a> Rakefile<'a> {
 
         if let Some(idx) = self.jobmap.get(key) {
             let old_job = self.jobs.get(*idx).unwrap_or_else(|| {
-                panic!("This certanily shouldn't have happened")
+                panic!("That certanily shouldn't have happened")
             });
             let f = &job.1.0;
             log!(WARN, "{f}:{l1}: Overriding recipe for target: '{key}'", l1 = job.1.1);
@@ -340,7 +342,6 @@ impl<'a> Rakefile<'a> {
             self.row += 1;
         } else if line.chars().find(|x| x.eq(&':')).is_some() {
             self.parse_job(line)?;
-
         } else if let Some(eq_idx) = line.chars().position(|x| x.eq(&'=')) {
             self.parse_variable_declaration(eq_idx, line)?;
         } else if !line.trim().is_empty() {
@@ -349,21 +350,24 @@ impl<'a> Rakefile<'a> {
         Ok(())
     }
 
-    const KEEPGOING_FLAG: &'static str = "-k";
-    const SILENT_FLAG: &'static str = "-s";
-
     fn parse_flags() -> (Config, Vec::<String>) {
-        let args = env::args().collect::<Vec::<_>>();
+        use Flag::*;
+
+        let args = env::args().skip(1).collect::<Vec::<_>>();
         let mut jobs = Vec::new();
         let mut keepgoing = false;
         let mut silent = false;
         for s in args.into_iter() {
-            match s.as_str() {
-                Self::KEEPGOING_FLAG => keepgoing = true,
-                Self::SILENT_FLAG    => silent = true,
-                _                    => jobs.push(s.to_owned())
-            }
+            if let Ok(flag) = Flag::try_from(&s) {
+                match flag {
+                    Keepgoing => keepgoing = true,
+                    Silent    => silent = true,
+                }
+            } else {
+                jobs.push(s.to_owned());
+            };
         }
+
         let mut cfg = Config::default();
         cfg.keepgoing(keepgoing).echo(!silent);
         (cfg, jobs)

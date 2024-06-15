@@ -52,5 +52,5 @@ test_silent:
 ## Quickstart:
 ```console
 $ cd examples
-$ cargo run
+$ cargo run --release
 ```

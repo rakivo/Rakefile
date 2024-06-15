@@ -77,7 +77,7 @@ impl Display for RakeError {
             DepsSSwithoutDeps(info)         => write!(f, "{f}:{r}: Special `deps` syntax without deps", f = info.0, r = info.1),
             NoTarget(info)                  => write!(f, "{f}:{r}: Target is mandatory", f = info.0, r = info.1),
             MultipleValues(info)            => write!(f, "{f}:{r}: Provide only one value", f = info.0, r = info.1),
-            InvalidValue(info, value) => write!(f, "{f}:{r}: Invalid value: {value}", f = info.0, r = info.1),
+            InvalidValue(info, value)       => write!(f, "{f}:{r}: Invalid value: {value}", f = info.0, r = info.1),
         }
     }
 }
