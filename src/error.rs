@@ -59,7 +59,11 @@ pub enum RakeError {
 
     MultipleValues(Info),
 
-    InvalidValue(Info, String)
+    InvalidValue(Info, String),
+
+    InvalidUseOfFlag(String, Vec::<String>),
+
+    InvalidFlag(String),
 }
 
 impl Display for RakeError {
@@ -76,6 +80,8 @@ impl Display for RakeError {
             NoTarget(info)                  => write!(f, "{f}:{r}: Target is mandatory", f = info.0, r = info.1),
             MultipleValues(info)            => write!(f, "{f}:{r}: Provide only one value", f = info.0, r = info.1),
             InvalidValue(info, value)       => write!(f, "{f}:{r}: Invalid value: {value}", f = info.0, r = info.1),
+            InvalidUseOfFlag(flag, args)    => write!(f, "Invalid use of flag: `{flag}`, arg: {args}", args = args.join(" ")),
+            InvalidFlag(flag)               => write!(f, "Unsupported flag: `{flag}`, supported flags: `-k`, `-s`, `-C`")
         }
     }
 }
