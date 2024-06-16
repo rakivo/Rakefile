@@ -1,9 +1,7 @@
-use {
-    std::{
-        process::exit,
-        path::PathBuf,
-        fmt::{Display, Formatter},
-    },
+use std::{
+    process::exit,
+    path::PathBuf,
+    fmt::{Display, Formatter},
 };
 use robuild::*;
 use crate::Rakefile;
