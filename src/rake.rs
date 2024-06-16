@@ -80,7 +80,7 @@ impl<'a> Rakefile<'a> {
 
     fn find_rakefile() -> RResult::<PathBuf> {
         let dir_path = env::current_dir().unwrap_or_report();
-        read_dir("./").unwrap_or_report()
+        read_dir(format!(".{DELIM_CHAR}")).unwrap_or_report()
             .into_iter()
             .filter_map(|p| p.ok())
             .find(|f| f.file_name() == Self::RAKE_FILE_NAME)
