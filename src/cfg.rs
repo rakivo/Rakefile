@@ -13,17 +13,17 @@ macro_rules! setter {
         }
 
         pub fn $if_fn(&self) -> Option::<$ty> {
-            self.flags.iter().position(|e| matches!(e, $name(_)))
-                .and_then(|idx| {
-                    match &self.flags[idx] {
-                        $name(arg) => Some(arg.to_owned()),
-                        _ => None,
-                    }
-                })
+            self.flags.iter().position(|e| matches!(e, $name(_))).and_then(|idx| {
+                match &self.flags[idx] {
+                    $name(arg) => Some(arg.to_owned()),
+                    _ => None,
+                }
+            })
         }
     }
 }
 
 impl RConfig {
     setter!{cd, if_cd, Cd, path: String}
+    // ...
 }

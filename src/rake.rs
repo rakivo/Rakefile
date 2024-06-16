@@ -447,5 +447,5 @@ fn main() {
     5. Variables and :=, ?=, += syntax.
     6. @ Syntax to disable echo for specific line.
     7. % syntax for pattern matching.
-    8. Refactor out (RConfig, Config, Vec::<String>) to separate structure
+    8. Refactor out (RConfig, Config, Vec::<String>) to separate structure.
  */
