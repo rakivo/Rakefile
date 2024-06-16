@@ -1,9 +1,11 @@
-use std::process::exit;
+use crate::RakeError;
 
 // NOTE: Update `supported flags` message if you updated this enum:
+#[derive(Debug, Clone, PartialEq)]
 pub enum Flag {
     Keepgoing,
-    Silent
+    Silent,
+    Cd(String)
 }
 
 impl ToString for Flag {
@@ -12,47 +14,37 @@ impl ToString for Flag {
         let s = match self {
             Keepgoing => "k",
             Silent    => "t",
+            Cd(arg)   => &format!("C {arg}"),
         };
         format!("-{s}")
     }
 }
 
-impl TryFrom::<&str> for Flag {
-    type Error = ();
+type FlagAndArg = (String, Option::<String>);
 
-    #[track_caller]
-    fn try_from(val: &str) -> Result<Self, Self::Error> {
+impl TryFrom::<FlagAndArg> for Flag {
+    type Error = RakeError;
+
+    fn try_from(farg: FlagAndArg) -> Result<Self, Self::Error> {
         use Flag::*;
-        match val {
+        let (f, arg) = farg;
+        match f.as_str() {
             "-k" => Ok(Keepgoing),
             "-s" => Ok(Silent),
-            _    => {
-                eprintln!("Unsupported flag: `{val}`");
-                eprintln!("Supported flags: `-k`, `-s`");
-                if cfg!(debug_assertions) {
-                    todo!()
-                } else {
-                    exit(1)
+            "-C" => if let Some(arg) = arg {
+                if arg.is_empty() {
+                    return Err(RakeError::InvalidUseOfFlag(f, vec![String::default()]))
                 }
+
+                let first = arg.chars().nth(0).unwrap() as u8;
+                match first {
+                    32..46 => Err(RakeError::InvalidUseOfFlag(f, vec![arg])),
+                    _      => Ok(Cd(arg.to_owned()))
+                }
+            } else {
+                Err(RakeError::InvalidUseOfFlag(f, vec![String::default()]))
             }
+            _ => Err(RakeError::InvalidFlag(f))
         }
-    }
-}
-
-impl TryFrom::<String> for Flag {
-    type Error = ();
-
-    #[track_caller]
-    fn try_from(val: String) -> Result<Self, Self::Error> {
-        Self::try_from(val.as_str())
-    }
-}
-
-impl TryFrom::<&String> for Flag {
-    type Error = ();
-
-    #[track_caller]
-    fn try_from(val: &String) -> Result<Self, Self::Error> {
-        Self::try_from(val.as_str())
     }
 }

@@ -2,7 +2,6 @@ use std::{
     env,
     result,
     str::Lines,
-    fs::read_dir,
     path::PathBuf,
     io::ErrorKind,
     iter::Peekable,
@@ -15,11 +14,14 @@ use regex::*;
 use robuild::*;
 
 mod error;
-use error::*;
 mod ss;
-use ss::*;
 mod flag;
+mod cfg;
+
+use error::*;
+use ss::*;
 use flag::*;
+use cfg::*;
 
 type RResult<T> = result::Result::<T, RakeError>;
 
@@ -80,12 +82,9 @@ impl<'a> Rakefile<'a> {
 
     fn find_rakefile() -> RResult::<PathBuf> {
         let dir_path = env::current_dir().unwrap_or_report();
-        read_dir(format!(".{DELIM_CHAR}")).unwrap_or_report()
-            .into_iter()
-            .filter_map(|p| p.ok())
-            .find(|f| f.file_name() == Self::RAKE_FILE_NAME)
-            .map(|f| f.path())
-            .ok_or_else(move || RakeError::NoRakefileInDir(dir_path))
+        Dir::new(&dir_path).into_iter()
+            .find(|f| matches!(f.file_name(), Some(name) if name == Self::RAKE_FILE_NAME))
+            .ok_or_else(move || RakeError::NoRakefileInDir(dir_path.to_owned()))
     }
 
     fn pretty_file_path(file_path: &str) -> String {
@@ -353,42 +352,60 @@ impl<'a> Rakefile<'a> {
         Ok(())
     }
 
-    fn parse_flags() -> (Config, Vec::<String>) {
+    fn parse_flags() -> RResult::<(RConfig, Config, Vec::<String>)> {
         use Flag::*;
+        use RakeError::*;
 
-        let args = env::args().skip(1).collect::<Vec::<_>>();
+        let mut iter = env::args().skip(1).into_iter();
+        let mut rcfg = RConfig::default();
+        let mut cfg = Config::default();
         let mut jobs = Vec::new();
-        let mut keepgoing = false;
-        let mut silent = false;
-        for s in args.into_iter() {
-            if let Ok(flag) = Flag::try_from(&s) {
-                match flag {
-                    Keepgoing => keepgoing = true,
-                    Silent    => silent = true,
+
+        while let Some(f) = iter.next() {
+            let farg = (f.to_owned(), iter.next());
+            match Flag::try_from(farg) {
+                Ok(flag) => match flag {
+                    Keepgoing => { cfg.keepgoing(true); }
+                    Silent    => { cfg.echo(false); }
+                    Cd(arg)   => { rcfg.cd(arg); }
                 }
-            } else {
-                jobs.push(s.to_owned());
-            };
+                Err(err) => match err {
+                    InvalidUseOfFlag(..) => return Err(err),
+                    _ => jobs.push(f.to_owned())
+                }
+            }
         }
 
-        let mut cfg = Config::default();
-        cfg.keepgoing(keepgoing).echo(!silent);
-        (cfg, jobs)
+        Ok((rcfg, cfg, jobs))
     }
 
-    fn check_potential_jobs(&mut self) -> Vec<RJob> {
-        self.potential_jobs.iter()
-            .filter_map(|pjob| self.jobs.iter().position(|j| j.0.target().eq(pjob)))
-            .collect::<HashSet::<_>>()
-            .into_iter()
-            .map(|idx| self.jobs[idx].to_owned())
-            .collect()
+    fn check_potential_jobs(&mut self) -> RResult::<Vec<RJob>> {
+        let ret = self.potential_jobs.iter().try_fold(HashSet::new(), |mut set, pj| {
+            if let Some(idx) = self.jobs.iter().position(|j| j.0.target().eq(pj)) {
+                set.insert(idx);
+                Ok(set)
+            } else {
+                Err(RakeError::InvalidFlag(pj.to_owned()))
+            }
+        })?.into_iter().map(|idx| self.jobs[idx].to_owned()).collect();
+
+        Ok(ret)
     }
 
     fn init() {
+        let (rcfg, cfg, potential_jobs) = Self::parse_flags().unwrap_or_report();
+
+        let (curr_dir, entered_dir) = if let Some(dir) = rcfg.if_cd() {
+            log!(INFO, "Entering directory `{dir}`");
+            env::set_current_dir(&dir).unwrap_or_report();
+            (dir, true)
+        } else {
+            (env::current_dir().unwrap_or_report().to_string_lossy().into_owned(), false)
+        };
+
         let file_path = Self::find_rakefile().unwrap_or_report();
         let file_str = read_to_string(&file_path).unwrap_or_report();
-        let (cfg, potential_jobs) = Self::parse_flags();
+
         let mut rakefile = Rakefile {
             cfg,
             deps_re: Regex::new(Self::DEPS_REGEX).unwrap(),
@@ -403,7 +420,7 @@ impl<'a> Rakefile<'a> {
             rakefile.parse_line(&line).unwrap_or_report();
         }
 
-        let pot_jobs = rakefile.check_potential_jobs();
+        let pot_jobs = rakefile.check_potential_jobs().unwrap_or_report();
 
         let jobs = if !pot_jobs.is_empty() {
             pot_jobs
@@ -414,6 +431,10 @@ impl<'a> Rakefile<'a> {
         jobs.into_iter().for_each(|j| {
             rakefile.execute_job(j).unwrap_or_report()
         });
+
+        if entered_dir {
+            log!(INFO, "Leaving directory `{curr_dir}`");
+        }
     }
 }
 
@@ -424,6 +445,7 @@ fn main() {
 /* TODO:
     4. Async mode | Sync mode,
     5. Variables and :=, ?=, += syntax.
-    6. @ Syntax to disable echo for specific line,
+    6. @ Syntax to disable echo for specific line.
     7. % syntax for pattern matching.
+    8. Refactor out (RConfig, Config, Vec::<String>) to separate structure
  */
