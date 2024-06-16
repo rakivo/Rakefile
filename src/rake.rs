@@ -2,8 +2,9 @@ use std::{
     env,
     result,
     str::Lines,
-    io::ErrorKind,
+    fs::read_dir,
     path::PathBuf,
+    io::ErrorKind,
     iter::Peekable,
     process::Output,
     default::Default,
@@ -79,10 +80,12 @@ impl<'a> Rakefile<'a> {
 
     fn find_rakefile() -> RResult::<PathBuf> {
         let dir_path = env::current_dir().unwrap_or_report();
-        let dir = Dir::new(&dir_path);
-        dir.into_iter()
-           .find(|f| matches!(f.file_name(), Some(name) if name == Self::RAKE_FILE_NAME))
-           .ok_or_else(move || RakeError::NoRakefileInDir(dir_path))
+        read_dir("./").unwrap_or_report()
+            .into_iter()
+            .filter_map(|p| p.ok())
+            .find(|f| f.file_name() == Self::RAKE_FILE_NAME)
+            .map(|f| f.path())
+            .ok_or_else(move || RakeError::NoRakefileInDir(dir_path))
     }
 
     fn pretty_file_path(file_path: &str) -> String {
@@ -377,12 +380,12 @@ impl<'a> Rakefile<'a> {
         self.potential_jobs.iter()
             .filter_map(|pjob| self.jobs.iter().position(|j| j.0.target().eq(pjob)))
             .collect::<HashSet::<_>>()
-            .iter()
-            .map(|idx| self.jobs[*idx].to_owned())
+            .into_iter()
+            .map(|idx| self.jobs[idx].to_owned())
             .collect()
     }
 
-    fn init()  {
+    fn init() {
         let file_path = Self::find_rakefile().unwrap_or_report();
         let file_str = read_to_string(&file_path).unwrap_or_report();
         let (cfg, potential_jobs) = Self::parse_flags();
