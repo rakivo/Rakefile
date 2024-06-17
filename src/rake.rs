@@ -77,7 +77,7 @@ impl Default for Rakefile<'_> {
 
 impl<'a> Rakefile<'a> {
     pub const TAB_WIDTH: usize = 4;
-    pub const MAX_DIR_LVL: usize = 2;
+    pub const MAX_DIR_LVL: usize = 3;
 
     pub const RAKE_FILE_NAME: &'static str = "Rakefile";
 
@@ -111,8 +111,6 @@ impl<'a> Rakefile<'a> {
             log!(WARN, "{f}:{l1}: Overriding recipe for target: '{key}'", l1 = job.1.1);
             log!(WARN, "{f}:{l2}: Defined here", l2 = old_job.1.1);
             self.jobs.remove(*idx);
-            let v = Vec::new();
-            v.remove()
         }
 
         self.jobmap.insert(key.to_owned(), self.jobs.len());
