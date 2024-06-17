@@ -412,5 +412,6 @@ fn main() {
     5. Variables and :=, ?=, += syntax.
     6. @ Syntax to disable echo for specific line.
     7. % syntax for pattern matching.
-    8. Factor out `MakePhony`, `RakePhony`, `MakeSilent` ..., to separate enum, because they're not special symbols
+    9. Make it possible to declare dependencies of the special .PHONY, .SILENT, ... jobs, before declaration of the specified job if ykwim
+    11. Factor out `MakePhony`, `RakePhony`, `MakeSilent` ..., to separate enum, because they're not special symbols
  */
