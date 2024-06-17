@@ -58,7 +58,9 @@ pub enum RakeError {
 
     InvalidUseOfFlag(String, Vec::<String>),
 
-    InvalidFlag(String),
+    InvalidArgument(String, String),
+
+    InvalidScheisse,
 }
 
 impl Display for RakeError {
@@ -78,7 +80,8 @@ impl Display for RakeError {
                 let joined = args.join(" ");
                 if joined.is_empty() { "[EMPTY]".to_owned() } else { joined }
             }),
-            InvalidFlag(flag)               => write!(f, "Unsupported flag: `{flag}`, supported flags: `-k`, `-s`, `-C`")
+            InvalidArgument(arg, jobs)      => write!(f, "No such job or flag: `{arg}`. Availiable jobs to call: {jobs}, supported flags: -k, -s, -C"),
+            _                               => panic!("No way")
         }
     }
 }

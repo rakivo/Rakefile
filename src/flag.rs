@@ -43,7 +43,7 @@ impl TryFrom::<FlagAndArg> for Flag {
             } else {
                 Err(RakeError::InvalidUseOfFlag(f, vec![String::default()]))
             }
-            _ => Err(RakeError::InvalidFlag(f))
+            _ => Err(RakeError::InvalidScheisse)
         }
     }
 }

@@ -16,22 +16,38 @@ pub enum SSymbol {
     MakeSilent
 }
 
+impl TryFrom::<&String> for SSymbol {
+    type Error = ();
+
+    fn try_from(val: &String) -> Result<Self, Self::Error> {
+        use SSymbol::*;
+        match val.as_str() {
+            "$@"      => Ok(MakeTarget),
+            "$t"      => Ok(RakeTarget),
+            "$d"      => Ok(MakeDep),
+            "$<"      => Ok(RakeDep),
+            "$ds"     => Ok(MakeDeps),
+            "$^"      => Ok(RakeDeps),
+            ".PHONY"  => Ok(MakePhony),
+            ".ALWAYS" => Ok(RakePhony),
+            ".SILENT" => Ok(MakeSilent),
+            _         => Err(())
+        }
+    }
+}
+
 impl ToString for SSymbol {
     fn to_string(&self) -> String {
         use SSymbol::*;
         match self {
             MakeTarget => "$@",
             RakeTarget => "$t",
-
             MakeDep    => "$d",
             RakeDep    => "$<",
-
             MakeDeps   => "$ds",
             RakeDeps   => "$^",
-
             MakePhony  => ".PHONY",
             RakePhony  => ".ALWAYS",
-
             MakeSilent => ".SILENT"
         }.to_owned()
     }
