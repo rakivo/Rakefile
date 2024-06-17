@@ -4,6 +4,7 @@ use std::{
     str::Lines,
     path::PathBuf,
     io::ErrorKind,
+    sync::LazyLock,
     iter::Peekable,
     process::Output,
     default::Default,
@@ -17,41 +18,35 @@ use std::{
 use regex::*;
 use robuild::*;
 
-mod error;
 mod ss;
-mod flag;
+mod ct;
 mod cfg;
+mod flag;
+mod error;
 
-use error::*;
 use ss::*;
-use flag::*;
+use ct::*;
 use cfg::*;
+use flag::*;
+use error::*;
 
 type RResult<T> = result::Result::<T, RakeError>;
 
 #[derive(Clone)]
 struct RJob(Job, Info);
 
+const DEPS_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\$d\[(.*?)\]").unwrap());
+const VARS_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\$\((.*?)\)").unwrap());
+
 struct Rakefile<'a> {
     row: usize,
-
-    cfg: Config,
-
-    deps_re: Regex,
-    vars_re: Regex,
 
     file_path: PathBuf,
 
     jobs: VecDeque::<RJob>,
     jobmap: HashMap::<String, usize>,
 
-    // When parsing flags, you can come across a string,
-    // that is not a defined flag, and it may be a potential job,
-    // similar to how in Makefile you can do `make examples` when `examples`
-    // is a defined job. Why potential? Because we are parsing flags before
-    // parsing `Rakefile` whether it exists or not, and after we parsed it,
-    // we can check, if the potential job is actually a defined one.
-    potential_jobs: Vec::<String>,
+    comptime: Comptime,
 
     vars: HashMap::<&'a str, &'a str>,
 
@@ -62,14 +57,11 @@ impl Default for Rakefile<'_> {
     fn default() -> Self {
         Self {
             row: 1,
-            cfg: Config::default(),
-            deps_re: Regex::new("").unwrap(),
-            vars_re: Regex::new("").unwrap(),
             file_path: PathBuf::default(),
             jobs: VecDeque::default(),
             jobmap: HashMap::default(),
-            potential_jobs: Vec::default(),
             vars: HashMap::default(),
+            comptime: Comptime::default(),
             iter: "".lines().peekable(),
         }
     }
@@ -80,9 +72,6 @@ impl<'a> Rakefile<'a> {
     pub const MAX_DIR_LVL: usize = 3;
 
     pub const RAKE_FILE_NAME: &'static str = "Rakefile";
-
-    pub const DEPS_REGEX: &'static str = r"\$d\[(.*?)\]";
-    pub const VARS_REGEX: &'static str = r"\$\((.*?)\)";
 
     fn find_rakefile() -> RResult::<PathBuf> {
         let dir_path = env::current_dir().unwrap_or_report();
@@ -101,7 +90,6 @@ impl<'a> Rakefile<'a> {
         }).collect::<Vec::<_>>().into_iter().rev().collect()
     }
 
-    #[inline]
     fn append_job(&mut self, job: RJob) {
         let key = job.0.target();
 
@@ -117,15 +105,15 @@ impl<'a> Rakefile<'a> {
         self.jobs.push_back(job);
     }
 
-    fn parse_deps_ss(&self, line: &str, deps: &Vec::<&str>) -> RResult::<String> {
-        for caps in self.deps_re.captures_iter(&line) {
+    fn parse_deps_ss(info: Info, line: &str, deps: &Vec::<&str>) -> RResult::<String> {
+        for caps in DEPS_REGEX.captures_iter(&line) {
             let idx = caps[1].parse::<usize>().unwrap_or(0);
             if deps.get(idx).is_none() {
-                return Err(RakeError::DepsIndexOutOfBounds(Info::from(self), deps.len()));
+                return Err(RakeError::DepsIndexOutOfBounds(info, deps.len()));
             }
         }
 
-        let deps = self.deps_re.replace_all(&line, |caps: &Captures| {
+        let deps = DEPS_REGEX.replace_all(&line, |caps: &Captures| {
             let idx = caps[1].parse::<usize>().unwrap_or(0);
             deps[idx]
         }).to_string();
@@ -144,7 +132,7 @@ impl<'a> Rakefile<'a> {
     {
         use SSymbol::*;
 
-        let mut line = self.parse_deps_ss(&line, &deps)?;
+        let mut line = Self::parse_deps_ss(Info::from(self), &line, &deps)?;
 
         sreplace!(line, MakeTarget, &target);
         sreplace!(line, RakeTarget, &target);
@@ -166,13 +154,13 @@ impl<'a> Rakefile<'a> {
     }
 
     fn parse_vars(&self, line: &str) -> RResult::<String> {
-        for caps in self.vars_re.captures_iter(&line) {
+        for caps in VARS_REGEX.captures_iter(&line) {
             if self.vars.get(&caps[1]).is_none() {
                 return Err(RakeError::InvalidValue(Info::from(self), caps[1].to_owned()))
             }
         }
 
-        Ok(self.vars_re.replace_all(&line, |caps: &Captures| self.vars.get(&caps[1]).unwrap()).to_string())
+        Ok(VARS_REGEX.replace_all(&line, |caps: &Captures| self.vars.get(&caps[1]).unwrap()).to_string())
     }
 
     #[inline(always)]
@@ -239,8 +227,9 @@ impl<'a> Rakefile<'a> {
             };
         }
 
+        let cfg = self.comptime.cfg();
         let cmd = body.iter()
-            .fold(RobCommand::from(self.cfg.to_owned()), |mut cmd, line| {
+            .fold(RobCommand::from(cfg.to_owned()), |mut cmd, line| {
                 cmd.append_mv(&[line]);
                 cmd
             });
@@ -275,8 +264,9 @@ impl<'a> Rakefile<'a> {
         curr_job_info: Info
     ) -> RResult::<()>
     {
+        let keepgoing = self.comptime.cfg().keepgoing;
         match output {
-            Ok(ok) => if ok.iter().find(|out| !out.stderr.is_empty()).is_some() && !self.cfg.keepgoing {
+            Ok(ok) => if ok.iter().find(|out| !out.stderr.is_empty()).is_some() && !keepgoing {
                 // Error-message printing handled in robuild: https://github.com/rakivo/robuild
                 Err(RakeError::FailedToExecute(dep_job_info))
             } else { Ok(()) }
@@ -310,8 +300,9 @@ impl<'a> Rakefile<'a> {
     }
 
     fn execute_job(&mut self, mut job: RJob) -> RResult::<()> {
+        let keepgoing = self.comptime.cfg().keepgoing;
         self.job_as_dep_check(job.to_owned())?;
-        if job.0.execute_async_dont_exit().is_err() && !self.cfg.keepgoing {
+        if job.0.execute_async_dont_exit().is_err() && !keepgoing {
             // Error-message printing handled in robuild: https://github.com/rakivo/robuild
             Err(RakeError::FailedToExecute(job.1.to_owned()))
         } else {
@@ -358,65 +349,36 @@ impl<'a> Rakefile<'a> {
     }
 
     fn check_potential_jobs(&mut self) -> RResult::<Vec<RJob>> {
-        let ret = self.potential_jobs.iter().try_fold(HashSet::new(), |mut set, pj| {
+        let ret = self.comptime.potential_jobs().iter().try_fold(HashSet::new(), |mut set, pj| {
             if let Some(idx) = self.jobs.iter().position(|j| j.0.target().eq(pj)) {
                 set.insert(idx);
                 Ok(set)
             } else {
-                Err(RakeError::InvalidFlag(pj.to_owned()))
+                let names = self.jobs.iter()
+                    .filter_map(|j| {
+                        let tar = j.0.target().to_owned();
+                        match SSymbol::try_from(&tar) {
+                            Ok(..) => None,
+                            Err(..) => Some(tar)
+                        }
+                    }).collect::<Vec::<_>>().join(", ");
+
+                Err(RakeError::InvalidArgument(pj.to_owned(), names))
             }
         })?.into_iter().map(|idx| self.jobs[idx].to_owned()).collect();
 
         Ok(ret)
     }
 
-    fn parse_flags() -> RResult::<(RConfig, Config, Vec::<String>)> {
-        use Flag::*;
-        use RakeError::*;
-
-        let mut iter = env::args().skip(1).into_iter();
-        let mut rcfg = RConfig::default();
-        let mut cfg = Config::default();
-        let mut jobs = Vec::new();
-
-        while let Some(f) = iter.next() {
-            let farg = (f.to_owned(), iter.next());
-            match Flag::try_from(farg) {
-                Ok(flag) => match flag {
-                    Keepgoing => { cfg.keepgoing(true); }
-                    Silent    => { cfg.echo(false); }
-                    Cd(arg)   => { rcfg.cd(arg); }
-                }
-                Err(err) => match err {
-                    InvalidUseOfFlag(..) => return Err(err),
-                    _ => jobs.push(f.to_owned())
-                }
-            }
-        }
-
-        Ok((rcfg, cfg, jobs))
-    }
-
     fn init() {
-        let (rcfg, cfg, potential_jobs) = Self::parse_flags().unwrap_or_report();
-
-        let (curr_dir, entered_dir) = if let Some(dir) = rcfg.if_cd() {
-            log!(INFO, "Entering directory `{dir}`");
-            env::set_current_dir(&dir).unwrap_or_report();
-            (dir, true)
-        } else {
-            (env::current_dir().unwrap_or_report().to_string_lossy().into_owned(), false)
-        };
+        let comptime = Comptime::new().unwrap_or_report();
 
         let file_path = Self::find_rakefile().unwrap_or_report();
         let file_str = read_to_string(&file_path).unwrap_or_report();
 
         let mut rakefile = Rakefile {
-            cfg,
-            deps_re: Regex::new(Self::DEPS_REGEX).unwrap(),
-            vars_re: Regex::new(Self::VARS_REGEX).unwrap(),
+            comptime,
             file_path,
-            potential_jobs,
             iter: file_str.lines().peekable(),
             ..Self::default()
         };
@@ -437,9 +399,7 @@ impl<'a> Rakefile<'a> {
             rakefile.execute_job(j).unwrap_or_report()
         });
 
-        if entered_dir {
-            log!(INFO, "Leaving directory `{curr_dir}`");
-        }
+        rakefile.comptime.handle_ucd();
     }
 }
 
@@ -452,5 +412,5 @@ fn main() {
     5. Variables and :=, ?=, += syntax.
     6. @ Syntax to disable echo for specific line.
     7. % syntax for pattern matching.
-    8. Refactor out (RConfig, Config, Vec::<String>) to separate structure.
+    8. Factor out `MakePhony`, `RakePhony`, `MakeSilent` ..., to separate enum, because they're not special symbols
  */
