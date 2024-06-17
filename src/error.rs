@@ -5,8 +5,10 @@ use std::{
 use robuild::*;
 use crate::Rakefile;
 
+const EXPECTED_TAB_WIDTH: usize = Rakefile::TAB_WIDTH;
+
 // File path, row
-#[derive(Eq, Hash, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Info(pub String, pub usize);
 
 impl From::<&Rakefile<'_>> for Info {
@@ -15,7 +17,6 @@ impl From::<&Rakefile<'_>> for Info {
         Self(rake.file_path.display().to_string(), rake.row)
     }
 }
-
 impl From::<(&Rakefile<'_>, usize)> for Info {
     #[inline]
     fn from(rrow: (&Rakefile, usize)) -> Self {
@@ -63,18 +64,20 @@ pub enum RakeError {
 impl Display for RakeError {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         use RakeError::*;
-        let expected_tab_width = Rakefile::TAB_WIDTH;
         match self {
             FailedToExecute(info)           => write!(f, "{f}:{r}: Failed to execute job", f = info.0, r = info.1),
-            InvalidIndentation(info, w)     => write!(f, "{f}:{r}: Invalid indentation, expected: {expected_tab_width}, got: {w}", f = info.0, r = info.1),
+            InvalidIndentation(info, w)     => write!(f, "{f}:{r}: Invalid indentation, expected: {EXPECTED_TAB_WIDTH}, got: {w}", f = info.0, r = info.1),
             InvalidDependency(info, dep)    => write!(f, "{f}:{r}: Dependency: `{dep}` nor a defined job, nor existing file, nor directory", f = info.0, r = info.1),
-            NoRakefileInDir(dir)            => write!(f, "No Rakefile in: `{dir}`"),
+            NoRakefileInDir(dir)            => write!(f, "No Rakefile in: `{dir}`, you can specify path to dir with Rakefile using `-C` flag. For instance: `rake -C ./path_to_rakefile/`"),
             DepsIndexOutOfBounds(info, len) => write!(f, "{f}:{r}: Index out of bounds, NOTE: treat your deps as zero-indexed array. Length of your deps-array is: {len}", f = info.0, r = info.1),
             DepsSSwithoutDeps(info)         => write!(f, "{f}:{r}: Special `deps` syntax without deps", f = info.0, r = info.1),
             NoTarget(info)                  => write!(f, "{f}:{r}: Target is mandatory", f = info.0, r = info.1),
             MultipleNames(info)             => write!(f, "{f}:{r}: Provide only one name of the variable", f = info.0, r = info.1),
             InvalidValue(info, value)       => write!(f, "{f}:{r}: Invalid value: {value}", f = info.0, r = info.1),
-            InvalidUseOfFlag(flag, args)    => write!(f, "Invalid use of flag: `{flag}`, arg: {args}", args = args.join(" ")),
+            InvalidUseOfFlag(flag, args)    => write!(f, "Invalid use of flag: `{flag}`, arg: {args}", args = {
+                let joined = args.join(" ");
+                if joined.is_empty() { "[EMPTY]".to_owned() } else { joined }
+            }),
             InvalidFlag(flag)               => write!(f, "Unsupported flag: `{flag}`, supported flags: `-k`, `-s`, `-C`")
         }
     }

@@ -1,6 +1,6 @@
 use crate::Flag::{self, *};
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct RConfig {
     flags: Vec::<Flag>
 }
