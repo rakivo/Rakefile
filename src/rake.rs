@@ -3,7 +3,6 @@ use std::{
     result,
     str::Lines,
     path::PathBuf,
-    io::ErrorKind,
     sync::LazyLock,
     iter::Peekable,
     process::Output,
@@ -32,7 +31,7 @@ use error::*;
 
 type RResult<T> = result::Result::<T, RakeError>;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct RJob(Job, Info);
 
 const DEPS_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\$d\[(.*?)\]").unwrap());
@@ -170,6 +169,7 @@ impl<'a> Rakefile<'a> {
 
     #[inline(always)]
     fn advance(&mut self) {
+        self.row += 1;
         self.iter.next();
     }
 
@@ -190,19 +190,17 @@ impl<'a> Rakefile<'a> {
 
         let deps_joined = deps.join(" ");
         let signature_row = self.row;
+
         let mut body = Vec::new();
         while let Some(next_line) = self.iter.peek() {
             let line = next_line.to_owned();
             if line.starts_with('#') {
                 self.advance();
-                self.row += 1;
                 continue
             }
 
             let line = self.parse_special_symbols(&target, &deps_joined, &deps, &line)?;
             let line = self.parse_vars(&line)?;
-
-            self.row += 1;
 
             let trimmed = line.trim().to_owned();
 
@@ -213,38 +211,25 @@ impl<'a> Rakefile<'a> {
                 continue
             }
 
-            let whitespace_count = line.chars()
-                .take_while(|c| c.is_whitespace())
-                .count();
-
+            let whitespace_count = line.chars().take_while(|c| c.is_whitespace()).count();
             match whitespace_count {
                 Self::TAB_WIDTH => {
                     self.advance();
                     body.push(trimmed)
                 }
                 i @ 1.. => return Err(RakeError::InvalidIndentation(Info::from(&*self), i)),
-                _ => if trimmed.is_empty() { self.advance(); } else { break }
+                _ => if trimmed.is_empty() { self.advance(); } else { self.row += 1; break }
             };
         }
 
         let cfg = self.comptime.cfg();
-        let cmd = body.iter()
-            .fold(RobCommand::from(cfg.to_owned()), |mut cmd, line| {
-                cmd.append_mv(&[line]);
-                cmd
-            });
+        let cmd = body.iter().fold(RobCommand::from(cfg.to_owned()), |mut cmd, line| {
+            cmd.append_mv(&[line]);
+            cmd
+        });
 
-        let ss_check1 = parse_special_job_by_target!(self, target,
-                                                     deps, cmd,
-                                                     phony, true,
-                                                     SSymbol::MakePhony,
-                                                     SSymbol::RakePhony);
-
-        let ss_check2 = parse_special_job_by_target!(self, target,
-                                                     deps, cmd,
-                                                     echo, false,
-                                                     SSymbol::MakeSilent);
-
+        let ss_check1 = parse_special_job_by_target!(self, target, deps, cmd, phony, true, SSymbol::MakePhony, SSymbol::RakePhony);
+        let ss_check2 = parse_special_job_by_target!(self, target, deps, cmd, echo, false, SSymbol::MakeSilent);
         if !(ss_check1 && ss_check2) {
             let job = Job::new(target, deps, cmd);
             let info = Info::from((&*self, signature_row));
@@ -258,22 +243,22 @@ impl<'a> Rakefile<'a> {
     fn handle_output
     (
         &self,
-        output: IoResult::<Vec::<Output>>,
-        dep: String,
         dep_job_info: Info,
-        curr_job_info: Info
+        output: RobResult::<Vec::<Output>>
     ) -> RResult::<()>
     {
         let keepgoing = self.comptime.cfg().keepgoing;
         match output {
-            Ok(ok) => if ok.iter().find(|out| !out.stderr.is_empty()).is_some() && !keepgoing {
+            Ok(ok) => if let Some(err) = ok.into_iter().find(|out| matches!(out.status.code(), Some(code) if code != 0)) {
                 // Error-message printing handled in robuild: https://github.com/rakivo/robuild
-                Err(RakeError::FailedToExecute(dep_job_info))
+                if !keepgoing {
+                    let err = String::from_utf8_lossy(&err.stderr);
+                    Err(RakeError::FailedToExecute(dep_job_info, err.to_string()))
+                } else { Ok(()) }
             } else { Ok(()) }
-            Err(err) => if err.kind().eq(&ErrorKind::NotFound) {
-                Err(RakeError::InvalidDependency(curr_job_info, dep))
-            } else {
-                Err(RakeError::FailedToExecute(curr_job_info))
+            Err(err) => match err {
+                RobError::NotFound(file_path) => Err(RakeError::InvalidDependency(dep_job_info, file_path)),
+                _ => Err(RakeError::FailedToExecute(dep_job_info, err.to_string()))
             }
         }
     }
@@ -288,8 +273,7 @@ impl<'a> Rakefile<'a> {
                     stack.push(dep_job.to_owned());
                     let out = dep_job.0.execute_async_dont_exit();
                     let dep_job_info = dep_job.1.to_owned();
-                    let curr_job_info = curr_job.1.to_owned();
-                    self.handle_output(out, dep.to_owned(), dep_job_info, curr_job_info)?;
+                    self.handle_output(dep_job_info, out)?;
                 } else if !(Rob::is_file(&dep) || Rob::is_dir(&dep)) {
                     return Err(RakeError::InvalidDependency(curr_job.1, dep.to_owned()));
                 }
@@ -302,9 +286,13 @@ impl<'a> Rakefile<'a> {
     fn execute_job(&mut self, mut job: RJob) -> RResult::<()> {
         let keepgoing = self.comptime.cfg().keepgoing;
         self.job_as_dep_check(job.to_owned())?;
-        if job.0.execute_async_dont_exit().is_err() && !keepgoing {
+        if let Err(err) = job.0.execute_async_dont_exit_unchecked() {
             // Error-message printing handled in robuild: https://github.com/rakivo/robuild
-            Err(RakeError::FailedToExecute(job.1.to_owned()))
+            if !keepgoing {
+                Err(RakeError::FailedToExecute(job.1.to_owned(), err.to_string()))
+            } else {
+                Ok(())
+            }
         } else {
             Ok(())
         }
@@ -370,6 +358,18 @@ impl<'a> Rakefile<'a> {
         Ok(ret)
     }
 
+    fn execute_jobs(&mut self) {
+        let pot_jobs = self.check_potential_jobs().unwrap_or_report();
+
+        let jobs = if !pot_jobs.is_empty() {
+            pot_jobs
+        } else {
+            vec![self.jobs[0].to_owned()]
+        };
+
+        jobs.into_iter().for_each(|j| self.execute_job(j).unwrap_or_report());
+    }
+
     fn init() {
         let comptime = Comptime::new().unwrap_or_report();
 
@@ -387,18 +387,7 @@ impl<'a> Rakefile<'a> {
             rakefile.parse_line(&line).unwrap_or_report();
         }
 
-        let pot_jobs = rakefile.check_potential_jobs().unwrap_or_report();
-
-        let jobs = if !pot_jobs.is_empty() {
-            pot_jobs
-        } else {
-            vec![rakefile.jobs[0].to_owned()]
-        };
-
-        jobs.into_iter().for_each(|j| {
-            rakefile.execute_job(j).unwrap_or_report()
-        });
-
+        rakefile.execute_jobs();
         rakefile.comptime.handle_ucd();
     }
 }
