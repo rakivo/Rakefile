@@ -1,33 +1,27 @@
 use std::{
     process::exit,
-    path::PathBuf,
     fmt::{Display, Formatter},
 };
 use robuild::*;
 use crate::Rakefile;
 
 // File path, row
-#[derive(Debug, Clone)]
+#[derive(Eq, Hash, Debug, Clone, PartialEq)]
 pub struct Info(pub String, pub usize);
-
-impl From::<Rakefile<'_>> for Info {
-    #[inline]
-    fn from(rake: Rakefile) -> Self {
-        Self(rake.file_path.to_owned(), rake.row)
-    }
-}
 
 impl From::<&Rakefile<'_>> for Info {
     #[inline]
     fn from(rake: &Rakefile) -> Self {
-        Self(rake.file_path.to_owned(), rake.row)
+        Self(rake.file_path.display().to_string(), rake.row)
     }
 }
 
-impl From::<&mut Rakefile<'_>> for Info {
+impl From::<(&Rakefile<'_>, usize)> for Info {
     #[inline]
-    fn from(rake: &mut Rakefile) -> Self {
-        Self::from(&*rake)
+    fn from(rrow: (&Rakefile, usize)) -> Self {
+        let mut info = Self::from(rrow.0);
+        info.1 = rrow.1;
+        info
     }
 }
 
@@ -40,7 +34,7 @@ pub enum RakeError {
     InvalidDependency(Info, String),
 
     /// Directory path
-    NoRakefileInDir(PathBuf),
+    NoRakefileInDir(String),
 
     /// Can be happen in case of $d[index] syntax.
     DepsIndexOutOfBounds(Info, usize),
@@ -74,7 +68,7 @@ impl Display for RakeError {
             FailedToExecute(info)           => write!(f, "{f}:{r}: Failed to execute job", f = info.0, r = info.1),
             InvalidIndentation(info, w)     => write!(f, "{f}:{r}: Invalid indentation, expected: {expected_tab_width}, got: {w}", f = info.0, r = info.1),
             InvalidDependency(info, dep)    => write!(f, "{f}:{r}: Dependency: `{dep}` nor a defined job, nor existing file, nor directory", f = info.0, r = info.1),
-            NoRakefileInDir(dir)            => write!(f, "No Rakefile in: `{dir}`", dir = dir.display()),
+            NoRakefileInDir(dir)            => write!(f, "No Rakefile in: `{dir}`"),
             DepsIndexOutOfBounds(info, len) => write!(f, "{f}:{r}: Index out of bounds, NOTE: treat your deps as zero-indexed array. Length of your deps-array is: {len}", f = info.0, r = info.1),
             DepsSSwithoutDeps(info)         => write!(f, "{f}:{r}: Special `deps` syntax without deps", f = info.0, r = info.1),
             NoTarget(info)                  => write!(f, "{f}:{r}: Target is mandatory", f = info.0, r = info.1),

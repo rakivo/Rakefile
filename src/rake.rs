@@ -8,7 +8,11 @@ use std::{
     process::Output,
     default::Default,
     fs::read_to_string,
-    collections::{HashSet, HashMap}
+    collections::{
+        VecDeque,
+        HashSet,
+        HashMap
+    }
 };
 use regex::*;
 use robuild::*;
@@ -36,9 +40,9 @@ struct Rakefile<'a> {
     deps_re: Regex,
     vars_re: Regex,
 
-    file_path: String,
+    file_path: PathBuf,
 
-    jobs: Vec::<RJob>,
+    jobs: VecDeque::<RJob>,
     jobmap: HashMap::<String, usize>,
 
     // When parsing flags, you can come across a string,
@@ -61,8 +65,8 @@ impl Default for Rakefile<'_> {
             cfg: Config::default(),
             deps_re: Regex::new("").unwrap(),
             vars_re: Regex::new("").unwrap(),
-            file_path: String::default(),
-            jobs: Vec::default(),
+            file_path: PathBuf::default(),
+            jobs: VecDeque::default(),
             jobmap: HashMap::default(),
             potential_jobs: Vec::default(),
             vars: HashMap::default(),
@@ -82,14 +86,16 @@ impl<'a> Rakefile<'a> {
 
     fn find_rakefile() -> RResult::<PathBuf> {
         let dir_path = env::current_dir().unwrap_or_report();
+        let pretty_path = Self::pretty_path(&dir_path);
         Dir::new(&dir_path).into_iter()
             .find(|f| matches!(f.file_name(), Some(name) if name == Self::RAKE_FILE_NAME))
-            .ok_or_else(move || RakeError::NoRakefileInDir(dir_path.to_owned()))
+            .ok_or_else(move || RakeError::NoRakefileInDir(pretty_path))
     }
 
-    fn pretty_file_path(file_path: &str) -> String {
+    fn pretty_path(file_path: &PathBuf) -> String {
         let mut count = 0;
-        file_path.chars().rev().take_while(|c| {
+        let string = file_path.display().to_string();
+        string.chars().rev().take_while(|c| {
             if *c == DELIM_CHAR { count += 1; }
             count < Self::MAX_DIR_LVL
         }).collect::<Vec::<_>>().into_iter().rev().collect()
@@ -105,10 +111,12 @@ impl<'a> Rakefile<'a> {
             log!(WARN, "{f}:{l1}: Overriding recipe for target: '{key}'", l1 = job.1.1);
             log!(WARN, "{f}:{l2}: Defined here", l2 = old_job.1.1);
             self.jobs.remove(*idx);
+            let v = Vec::new();
+            v.remove()
         }
 
         self.jobmap.insert(key.to_owned(), self.jobs.len());
-        self.jobs.push(job);
+        self.jobs.push_back(job);
     }
 
     fn parse_deps_ss(&self, line: &str, deps: &Vec::<&str>) -> RResult::<String> {
@@ -186,7 +194,7 @@ impl<'a> Rakefile<'a> {
         let target = target_untrimmed.trim();
 
         if target.is_empty() {
-            return Err(RakeError::NoTarget(Info::from(self)))
+            return Err(RakeError::NoTarget(Info::from(&*self)))
         }
 
         let deps = deps_untrimmed
@@ -228,7 +236,7 @@ impl<'a> Rakefile<'a> {
                     self.advance();
                     body.push(trimmed)
                 }
-                i @ 1.. => return Err(RakeError::InvalidIndentation(Info::from(self), i)),
+                i @ 1.. => return Err(RakeError::InvalidIndentation(Info::from(&*self), i)),
                 _ => if trimmed.is_empty() { self.advance(); } else { break }
             };
         }
@@ -252,7 +260,7 @@ impl<'a> Rakefile<'a> {
 
         if !(ss_check1 && ss_check2) {
             let job = Job::new(target, deps, cmd);
-            let info = Info(self.file_path.to_owned(), signature_row);
+            let info = Info::from((&*self, signature_row));
             let rjob = RJob(job, info);
             self.append_job(rjob);
         }
@@ -318,7 +326,7 @@ impl<'a> Rakefile<'a> {
         let name = name_untrimmed.trim();
 
         if name.split_whitespace().count() > 1 {
-            return Err(RakeError::MultipleNames(Info::from(self)))
+            return Err(RakeError::MultipleNames(Info::from(&*self)))
         }
 
         let value_trimmed = value_untrimmed[2..].trim();
@@ -326,7 +334,7 @@ impl<'a> Rakefile<'a> {
         let value = if value_trimmed.starts_with("$(") && value_trimmed.ends_with(')') {
             match self.vars.get(&value_trimmed[2..value_trimmed.len() - 1]) {
                 Some(val) => val,
-                _ => return Err(RakeError::InvalidValue(Info::from(self), value_trimmed.to_owned()))
+                _ => return Err(RakeError::InvalidValue(Info::from(&*self), value_trimmed.to_owned()))
             }
         } else {
             value_trimmed
@@ -409,7 +417,7 @@ impl<'a> Rakefile<'a> {
             cfg,
             deps_re: Regex::new(Self::DEPS_REGEX).unwrap(),
             vars_re: Regex::new(Self::VARS_REGEX).unwrap(),
-            file_path: Self::pretty_file_path(file_path.to_str().expect("Failed to convert file path to str")),
+            file_path,
             potential_jobs,
             iter: file_str.lines().peekable(),
             ..Self::default()

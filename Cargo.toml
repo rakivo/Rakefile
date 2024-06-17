@@ -1,5 +1,5 @@
 [package]
-name = "rakefile"
+name = "rake"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,4 +11,4 @@ robuild = "0.0.31" # Here it is: https://github.com/rakivo/robuild
 
 [[bin]]
 path = "src/rake.rs"
-name = "rakefile"
+name = "rake"
