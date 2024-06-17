@@ -49,7 +49,7 @@ struct Rakefile<'a> {
     // we can check, if the potential job is actually a defined one.
     potential_jobs: Vec::<String>,
 
-    vars: HashMap::<&'a str, String>,
+    vars: HashMap::<&'a str, &'a str>,
 
     iter: Peekable::<Lines<'a>>
 }
@@ -100,9 +100,7 @@ impl<'a> Rakefile<'a> {
         let key = job.0.target();
 
         if let Some(idx) = self.jobmap.get(key) {
-            let old_job = self.jobs.get(*idx).unwrap_or_else(|| {
-                panic!("That certanily shouldn't have happened")
-            });
+            let old_job = self.jobs.get(*idx).unwrap();
             let f = &job.1.0;
             log!(WARN, "{f}:{l1}: Overriding recipe for target: '{key}'", l1 = job.1.1);
             log!(WARN, "{f}:{l2}: Defined here", l2 = old_job.1.1);
@@ -138,6 +136,8 @@ impl<'a> Rakefile<'a> {
         line: &str
     ) -> RResult::<String>
     {
+        use SSymbol::*;
+
         let mut line = self.parse_deps_ss(&line, &deps)?;
 
         sreplace!(line, MakeTarget, &target);
@@ -195,7 +195,7 @@ impl<'a> Rakefile<'a> {
             .collect::<Vec::<_>>();
 
         let deps_joined = deps.join(" ");
-        let signature_row = self.row + 1;
+        let signature_row = self.row;
         let mut body = Vec::new();
         while let Some(next_line) = self.iter.peek() {
             let line = next_line.to_owned();
@@ -209,6 +209,7 @@ impl<'a> Rakefile<'a> {
             let line = self.parse_vars(&line)?;
 
             self.row += 1;
+
             let trimmed = line.trim().to_owned();
 
             // Allow people to use both tabs and spaces
@@ -316,17 +317,15 @@ impl<'a> Rakefile<'a> {
         let (name_untrimmed, value_untrimmed) = line.split_at(idx);
         let name = name_untrimmed.trim();
 
-        if value_untrimmed.split_whitespace().skip(1).count() > 1 {
-            return Err(RakeError::MultipleValues(Info::from(self)))
+        if name.split_whitespace().count() > 1 {
+            return Err(RakeError::MultipleNames(Info::from(self)))
         }
 
-        let value_trimmed = value_untrimmed.split_whitespace()
-            .skip(1)
-            .collect::<String>();
+        let value_trimmed = value_untrimmed[2..].trim();
 
         let value = if value_trimmed.starts_with("$(") && value_trimmed.ends_with(')') {
             match self.vars.get(&value_trimmed[2..value_trimmed.len() - 1]) {
-                Some(val) => val.to_owned(),
+                Some(val) => val,
                 _ => return Err(RakeError::InvalidValue(Info::from(self), value_trimmed.to_owned()))
             }
         } else {
@@ -340,7 +339,7 @@ impl<'a> Rakefile<'a> {
     }
 
     fn parse_line(&mut self, line: &'a str) -> RResult::<()> {
-        if line.starts_with('#') {
+        if line.trim().is_empty() || line.starts_with('#') {
             self.row += 1;
         } else if line.chars().find(|x| x.eq(&':')).is_some() {
             self.parse_job(line)?;
@@ -350,6 +349,19 @@ impl<'a> Rakefile<'a> {
             panic!("Wtf is dis scheisse: `{line}` ??? ");
         }
         Ok(())
+    }
+
+    fn check_potential_jobs(&mut self) -> RResult::<Vec<RJob>> {
+        let ret = self.potential_jobs.iter().try_fold(HashSet::new(), |mut set, pj| {
+            if let Some(idx) = self.jobs.iter().position(|j| j.0.target().eq(pj)) {
+                set.insert(idx);
+                Ok(set)
+            } else {
+                Err(RakeError::InvalidFlag(pj.to_owned()))
+            }
+        })?.into_iter().map(|idx| self.jobs[idx].to_owned()).collect();
+
+        Ok(ret)
     }
 
     fn parse_flags() -> RResult::<(RConfig, Config, Vec::<String>)> {
@@ -377,19 +389,6 @@ impl<'a> Rakefile<'a> {
         }
 
         Ok((rcfg, cfg, jobs))
-    }
-
-    fn check_potential_jobs(&mut self) -> RResult::<Vec<RJob>> {
-        let ret = self.potential_jobs.iter().try_fold(HashSet::new(), |mut set, pj| {
-            if let Some(idx) = self.jobs.iter().position(|j| j.0.target().eq(pj)) {
-                set.insert(idx);
-                Ok(set)
-            } else {
-                Err(RakeError::InvalidFlag(pj.to_owned()))
-            }
-        })?.into_iter().map(|idx| self.jobs[idx].to_owned()).collect();
-
-        Ok(ret)
     }
 
     fn init() {
