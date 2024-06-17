@@ -1,7 +1,6 @@
 use crate::RakeError;
 
 // NOTE: Update `supported flags` message if you updated this enum:
-#[derive(Debug, Clone, PartialEq)]
 pub enum Flag {
     Keepgoing,
     Silent,
