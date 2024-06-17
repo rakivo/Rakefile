@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 regex = { version = "1.10.5", default-features = false }
 # My super ultra mega pogchamp library in pure RUST to build your projects in RUST called `robuild`.
-robuild = "0.0.31" # Here it is: https://github.com/rakivo/robuild
+robuild = "0.0.32" # Here it is: https://github.com/rakivo/robuild
 # robuild = { path = "../robuild" }
 
 [[bin]]
