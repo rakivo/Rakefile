@@ -3,10 +3,12 @@ use std::{
     collections::HashSet
 };
 use robuild::*;
+
 use crate::{
     Config,
-    RResult,
     RConfig,
+    RResult,
+    ALL_FLAGS_STR,
     error::UnwrapOrReport
 };
 
@@ -51,14 +53,12 @@ impl Comptime {
             if skip { continue }
 
             let arg = if let Some(arg) = iter.peek() {
-                if arg.starts_with('-') { None }
+                if ALL_FLAGS_STR.contains(&arg.as_str()) { None }
                 else {
                     skip = true;
                     Some(arg.to_owned())
                 }
-            } else {
-                None
-            };
+            } else { None };
 
             let farg = (f.to_owned(), arg);
             match Flag::try_from(farg) {
