@@ -1,11 +1,13 @@
 use crate::RakeError;
 
-// NOTE: Update `supported flags` message if you updated this enum:
+// NOTE: Update `supported flags and all_flags constant` message if you updated this enum:
 pub enum Flag {
     Keepgoing,
     Silent,
     Cd(String)
 }
+
+pub const ALL_FLAGS_STR: &[&str] = &["-k", "s", "-C"];
 
 impl ToString for Flag {
     fn to_string(&self) -> String {
