@@ -26,6 +26,7 @@ impl TryFrom::<FlagAndArg> for Flag {
 
     fn try_from(farg: FlagAndArg) -> Result<Self, Self::Error> {
         use Flag::*;
+        println!("{farg:?}");
         let (f, arg) = farg;
         match f.as_str() {
             "-k" => Ok(Keepgoing),

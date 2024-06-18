@@ -40,14 +40,27 @@ impl Comptime {
         use crate::Flag::{self, *};
         use crate::RakeError::*;
 
-        let mut iter = env::args().skip(1).into_iter();
+        let mut iter = env::args().skip(1).into_iter().peekable();
 
         let mut cfg = Config::default();
         let mut rcfg = RConfig::default();
         let mut potential_jobs = HashSet::new();
 
+        let mut skip = false;
         while let Some(f) = iter.next() {
-            let farg = (f.to_owned(), iter.next());
+            if skip { continue }
+
+            let arg = if let Some(arg) = iter.peek() {
+                if arg.starts_with('-') { None }
+                else {
+                    skip = true;
+                    Some(arg.to_owned())
+                }
+            } else {
+                None
+            };
+
+            let farg = (f.to_owned(), arg);
             match Flag::try_from(farg) {
                 Ok(flag) => match flag {
                     Keepgoing => { cfg.keepgoing(true); }
