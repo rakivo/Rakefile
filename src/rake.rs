@@ -267,15 +267,17 @@ impl<'a> Rakefile<'a> {
     fn job_as_dep_check(&mut self, job: RJob) -> RResult<&mut Self> {
         let mut stack = vec![job];
 
-        while let Some(curr_job) = stack.pop() {
-            for dep in curr_job.0.deps().iter() {
-                if let Some(dep_job) = self.find_job_by_target_mut(&dep.to_owned()) {
-                    stack.push(dep_job.to_owned());
-                    let out = dep_job.0.execute_async_dont_exit();
-                    let dep_job_info = dep_job.1.to_owned();
-                    self.handle_output(dep_job_info, out)?;
-                } else if !(Rob::is_file(&dep) || Rob::is_dir(&dep)) {
-                    return Err(RakeError::InvalidDependency(curr_job.1, dep.to_owned()));
+        while let Some(mut curr_job) = stack.pop() {
+            if curr_job.0.deps().iter().any(|d| Rob::is_file(&d)) {
+                let out = curr_job.0.execute_async_dont_exit();
+                self.handle_output(curr_job.1, out)?;
+            } else {
+                for dep in curr_job.0.deps().iter() {
+                    if let Some(dep_job) = self.find_job_by_target_mut(&dep.to_owned()) {
+                        stack.push(dep_job.to_owned());
+                    } else if !(Rob::is_file(&dep) || Rob::is_dir(&dep)) {
+                        return Err(RakeError::InvalidDependency(curr_job.1, dep.to_owned()));
+                    }
                 }
             }
         }
@@ -403,4 +405,6 @@ fn main() {
     7. % syntax for pattern matching.
     9. Make it possible to declare dependencies of the special .PHONY, .SILENT, ... jobs, before declaration of the specified job if ykwim
     11. Factor out `MakePhony`, `RakePhony`, `MakeSilent` ..., to separate enum, because they're not special symbols
+    12. Fix a shit ton of fucking bugs. It's so fucking annoying to realize that your program is useless shit after working on it for two weeks
+    13. Make `Job::execute_all_async` execute async for real, and do not wait for every fucking child every fucking job, useless piece of shit.
  */
